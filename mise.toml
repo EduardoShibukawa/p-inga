@@ -4,3 +4,6 @@ hk = "1.24.0"
 
 [tasks.pre-commit]
 run = "bun test"
+
+[tasks.stable]
+run = "bun scripts/stable.ts"
