@@ -3,7 +3,7 @@ import { defaultLedgerPath, openLedger } from "./ledger";
 import { verifyPlan } from "./verify";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
-       pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA]
+       pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH]
        pinga precommit [-- <cmd...>]`;
 
 export function runCli(argv: string[]): number {
@@ -45,6 +45,7 @@ export function runCli(argv: string[]): number {
     let ledgerPath: string | undefined;
     let attempt: number | undefined;
     let base: string | undefined;
+    let usageFile: string | undefined;
 
     for (let i = 0; i < rest.length; i++) {
       const arg = rest[i];
@@ -73,13 +74,21 @@ export function runCli(argv: string[]): number {
         }
         base = value;
         i++;
+      } else if (arg === "--usage-file") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "" || value.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        usageFile = value;
+        i++;
       } else {
         console.error(USAGE);
         return 2;
       }
     }
 
-    return verifyPlan(planPath, ledgerPath, attempt, { base });
+    return verifyPlan(planPath, ledgerPath, attempt, { base, usageFile });
   }
 
   if (command === "precommit") {

@@ -12,6 +12,8 @@ import { defaultLedgerPath, openLedger } from "./ledger";
 import { changedFiles, evaluateGuards, findRedBase } from "./guards";
 import { parsePlan } from "./plan";
 import type { ReasonCode, Receipt, Status } from "./receipt";
+import { resolveUsageFile, tokenFieldsFor } from "./tokens";
+import type { TokenFields } from "./tokens";
 
 function sha256hex(data: Buffer | string): string {
   return createHash("sha256").update(data).digest("hex");
@@ -24,7 +26,16 @@ function authorFromEnv(): { model: string | null; family: string | null } {
   };
 }
 
-export type VerifyOptions = { base?: string };
+export type VerifyOptions = { base?: string; usageFile?: string };
+
+function tokenFieldsFromOptions(opts?: VerifyOptions): TokenFields {
+  const usagePath = resolveUsageFile(opts?.usageFile);
+  const tf = tokenFieldsFor(usagePath);
+  if (tf.cost_evidence.startsWith("invalid:")) {
+    console.error(`usage warning: ${tf.cost_evidence}`);
+  }
+  return tf;
+}
 
 export function verifyPlan(
   planPath: string,
@@ -78,6 +89,7 @@ export function verifyPlan(
     const parsed = parsePlan(readFileSync(resolvedPlanPath, "utf8"));
 
     if (!parsed.ok) {
+      const tf = tokenFieldsFromOptions(opts);
       const receipt: Receipt = {
         v: 1,
         type: "task.receipt",
@@ -87,9 +99,9 @@ export function verifyPlan(
         reason_code: "plan_invalid",
         attempts: attempt,
         evidence: [],
-        tokens: { in: null, out: null, cache: null, source: null },
-        cost_usd: null,
-        cost_evidence: "not run",
+        tokens: tf.tokens,
+        cost_usd: tf.cost_usd,
+        cost_evidence: tf.cost_evidence,
         author: authorFromEnv(),
         verified_by: null,
         summary: `${task} blocked: plano inválido (${parsed.errors[0]})`.slice(
@@ -119,6 +131,7 @@ export function verifyPlan(
           guardRes.reason_code === "tests_frozen_changed"
             ? `${task} blocked: tests_frozen alterado (${guardRes.files.join(", ")})`
             : `${task} blocked: fora do touch (${guardRes.files.join(", ")})`;
+        const tf = tokenFieldsFromOptions(opts);
         const receipt: Receipt = {
           v: 1,
           type: "task.receipt",
@@ -128,9 +141,9 @@ export function verifyPlan(
           reason_code: guardRes.reason_code,
           attempts: attempt,
           evidence: [],
-          tokens: { in: null, out: null, cache: null, source: null },
-          cost_usd: null,
-          cost_evidence: "not run",
+          tokens: tf.tokens,
+          cost_usd: tf.cost_usd,
+          cost_evidence: tf.cost_evidence,
           author: authorFromEnv(),
           verified_by: null,
           summary: summary.slice(0, 280),
@@ -222,6 +235,7 @@ export function verifyPlan(
       }
     }
 
+    const tf = tokenFieldsFromOptions(opts);
     const receipt: Receipt = {
       v: 1,
       type: "task.receipt",
@@ -242,9 +256,9 @@ export function verifyPlan(
           },
         },
       ],
-      tokens: { in: null, out: null, cache: null, source: null },
-      cost_usd: null,
-      cost_evidence: "not run",
+      tokens: tf.tokens,
+      cost_usd: tf.cost_usd,
+      cost_evidence: tf.cost_evidence,
       author: authorFromEnv(),
       verified_by: null,
       ...(breaker !== undefined ? { breaker } : {}),
