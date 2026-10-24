@@ -1,4 +1,5 @@
 import { evalPlan } from "./eval";
+import { examplesPlan } from "./examples";
 import { judgePlan } from "./judge";
 import { modePlan } from "./mode";
 import { precommitDecision } from "./guards";
@@ -10,6 +11,7 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga mode <PLAN.md> [--base SHA] [--override-mode M --reason TEXTO]
        pinga judge <PLAN.md> [--ledger PATH] [--judge-model M] [--endpoint URL] [--base SHA] [--usage-file PATH]
        pinga eval <PLAN.md> [--ledger PATH] [--check]
+       pinga examples <PLAN.md> --from PATH
        pinga precommit [-- <cmd...>]`;
 
 export function runCli(argv: string[]): number | Promise<number> {
@@ -239,6 +241,39 @@ export function runCli(argv: string[]): number | Promise<number> {
     }
 
     return evalPlan(planPath, { ledgerPath, check });
+  }
+
+  if (command === "examples") {
+    const planPath = subcommand;
+    if (planPath === undefined || planPath === "" || planPath.startsWith("--")) {
+      console.error(USAGE);
+      return 2;
+    }
+
+    let from: string | undefined;
+
+    for (let i = 0; i < rest.length; i++) {
+      const arg = rest[i];
+      if (arg === "--from") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "" || value.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        from = value;
+        i++;
+      } else {
+        console.error(USAGE);
+        return 2;
+      }
+    }
+
+    if (from === undefined) {
+      console.error(USAGE);
+      return 2;
+    }
+
+    return examplesPlan(planPath, { from });
   }
 
   if (command === "precommit") {

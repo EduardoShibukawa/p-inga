@@ -9,6 +9,7 @@ import {
   shouldTrip,
 } from "./breaker";
 import { defaultLedgerPath, openLedger } from "./ledger";
+import { OVERFIT_EXIT, holdoutRunnerPath, runHoldout } from "./examples";
 import { changedFiles, evaluateGuards, findRedBase } from "./guards";
 import { currentBranch, parseOverride, resolveMode } from "./mode";
 import type { ModeDecision } from "./mode";
@@ -216,6 +217,7 @@ export function verifyPlan(
     let cliExit: number;
     let breaker: Receipt["breaker"];
     let summary: string;
+    let holdoutEvidence: Evidence | null = null;
 
     const segundos = Math.round(duration_ms / 1000);
     const normalSummary = () =>
@@ -236,6 +238,60 @@ export function verifyPlan(
       evidenceExit = 0;
       cliExit = 0;
       summary = normalSummary();
+
+      // Holdout reservado (I13/I14): só roda quando o done_when terminou
+      // exit 0 e sem timeout. Sem store para (repo, task), recibo igual ao
+      // de antes (evidence com 1 item).
+      const hRun = runHoldout(repoRoot, task, attempt, timeoutMs);
+      if (hRun !== null) {
+        holdoutEvidence = {
+          kind: "command",
+          cmd_sha256: sha256hex(`bun test ./${holdoutRunnerPath(task)}`),
+          exit: hRun.exit,
+          duration_ms: hRun.duration_ms,
+          artifact_ref: hRun.artifact,
+        };
+        if (hRun.timedOut) {
+          status = "blocked";
+          reason_code = "budget";
+          cliExit = 2;
+          summary =
+            `${task} blocked: holdout timeout em ${Math.round(hRun.duration_ms / 1000)}s`.slice(
+              0,
+              280,
+            );
+        } else if (hRun.exit === 0) {
+          summary = `${normalSummary()} · holdout ok`.slice(0, 280);
+        } else {
+          const sig = computeFailureSignature({
+            exit: hRun.exit,
+            out_sha256: hRun.artifact.sha256,
+            reason_code: "overfit_holdout",
+          });
+          const prev = lastReceiptFor(ledger, task);
+          if (shouldTrip(prev, sig)) {
+            status = "blocked";
+            reason_code = "breaker_same_failure";
+            cliExit = BREAKER_EXIT;
+            breaker = { tripped: true, failure_signature: sig };
+            summary =
+              `${task} blocked: disjuntor armado, mesma falha 2x seguidas (holdout exit ${hRun.exit}); escalar ao dono`.slice(
+                0,
+                280,
+              );
+          } else {
+            status = "fail";
+            reason_code = "overfit_holdout";
+            cliExit = OVERFIT_EXIT;
+            breaker = { tripped: false, failure_signature: sig };
+            summary =
+              `${task} fail: visíveis passam, holdout falhou (overfit ao contrato visível)`.slice(
+                0,
+                280,
+              );
+          }
+        }
+      }
     } else {
       const sig = computeFailureSignature({
         exit: res.exitCode,
@@ -286,6 +342,7 @@ export function verifyPlan(
             sha256: outSha256,
           },
         },
+        ...(holdoutEvidence !== null ? [holdoutEvidence] : []),
       ],
       tokens: tf.tokens,
       cost_usd: tf.cost_usd,

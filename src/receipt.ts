@@ -13,6 +13,7 @@ export const REASON_CODES = [
   "not_executed",
   "judge_rejected",
   "model_unattested",
+  "overfit_holdout",
 ] as const;
 export const MAX_RECEIPT_BYTES = 4096;
 export const MAX_TEXT = 280;
