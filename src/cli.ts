@@ -1,9 +1,11 @@
+import { evalPlan } from "./eval";
 import { precommitDecision } from "./guards";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { verifyPlan } from "./verify";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH]
+       pinga eval <PLAN.md> [--ledger PATH] [--check]
        pinga precommit [-- <cmd...>]`;
 
 export function runCli(argv: string[]): number {
@@ -89,6 +91,37 @@ export function runCli(argv: string[]): number {
     }
 
     return verifyPlan(planPath, ledgerPath, attempt, { base, usageFile });
+  }
+
+  if (command === "eval") {
+    const planPath = subcommand;
+    if (planPath === undefined || planPath === "" || planPath.startsWith("--")) {
+      console.error(USAGE);
+      return 2;
+    }
+
+    let ledgerPath: string | undefined;
+    let check = false;
+
+    for (let i = 0; i < rest.length; i++) {
+      const arg = rest[i];
+      if (arg === "--ledger") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "") {
+          console.error(USAGE);
+          return 2;
+        }
+        ledgerPath = value;
+        i++;
+      } else if (arg === "--check") {
+        check = true;
+      } else {
+        console.error(USAGE);
+        return 2;
+      }
+    }
+
+    return evalPlan(planPath, { ledgerPath, check });
   }
 
   if (command === "precommit") {
