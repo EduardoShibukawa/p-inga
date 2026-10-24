@@ -1,6 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import {
+  BREAKER_EXIT,
+  BREAKER_NEXT_ACTION,
+  computeFailureSignature,
+  lastReceiptFor,
+  shouldTrip,
+} from "./breaker";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { changedFiles, evaluateGuards, findRedBase } from "./guards";
 import { parsePlan } from "./plan";
@@ -163,25 +170,57 @@ export function verifyPlan(
     let reason_code: ReasonCode | null;
     let evidenceExit: number | null;
     let cliExit: number;
+    let breaker: Receipt["breaker"];
+    let summary: string;
+
+    const segundos = Math.round(duration_ms / 1000);
+    const normalSummary = () =>
+      `${task} ${status}: done_when exit ${evidenceExit} em ${segundos}s`.slice(
+        0,
+        280,
+      );
 
     if (timedOut) {
       status = "blocked";
       reason_code = "budget";
       evidenceExit = null;
       cliExit = 2;
+      summary = normalSummary();
     } else if (res.exitCode === 0) {
       status = "pass";
       reason_code = null;
       evidenceExit = 0;
       cliExit = 0;
+      summary = normalSummary();
     } else {
-      status = "fail";
-      reason_code = "command_failed";
-      evidenceExit = res.exitCode;
-      cliExit = 1;
-    }
+      const sig = computeFailureSignature({
+        exit: res.exitCode,
+        out_sha256: outSha256,
+        reason_code: "command_failed",
+      });
+      // Lê o último recibo da task ANTES de gravar o atual.
+      const prev = lastReceiptFor(ledger, task);
 
-    const segundos = Math.round(duration_ms / 1000);
+      if (shouldTrip(prev, sig)) {
+        status = "blocked";
+        reason_code = "breaker_same_failure";
+        evidenceExit = res.exitCode;
+        cliExit = BREAKER_EXIT;
+        breaker = { tripped: true, failure_signature: sig };
+        summary =
+          `${task} blocked: disjuntor armado, mesma falha 2x seguidas (exit ${evidenceExit}); escalar ao dono`.slice(
+            0,
+            280,
+          );
+      } else {
+        status = "fail";
+        reason_code = "command_failed";
+        evidenceExit = res.exitCode;
+        cliExit = 1;
+        breaker = { tripped: false, failure_signature: sig };
+        summary = normalSummary();
+      }
+    }
 
     const receipt: Receipt = {
       v: 1,
@@ -208,10 +247,9 @@ export function verifyPlan(
       cost_evidence: "not run",
       author: authorFromEnv(),
       verified_by: null,
-      summary: `${task} ${status}: done_when exit ${evidenceExit} em ${segundos}s`.slice(
-        0,
-        280,
-      ),
+      ...(breaker !== undefined ? { breaker } : {}),
+      ...(breaker?.tripped ? { next_action: BREAKER_NEXT_ACTION } : {}),
+      summary,
       created_at: new Date().toISOString(),
     };
 
