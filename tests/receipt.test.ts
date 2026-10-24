@@ -63,6 +63,7 @@ describe("T01 — receipt schema v1 & validator", () => {
       "not_executed",
       "judge_rejected",
       "model_unattested",
+      "overfit_holdout",
     ]);
     expect(MAX_RECEIPT_BYTES).toBe(4096);
     expect(MAX_TEXT).toBe(280);
