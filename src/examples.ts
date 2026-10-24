@@ -430,9 +430,13 @@ export type HoldoutRun = {
 export function runHoldout(
   repoRoot: string,
   task: string,
-  attempt: number,
+  attempt: number | string,
   timeoutMs: number,
+  opts?: { cwd?: string },
 ): HoldoutRun | null {
+  // A store e o artefato continuam atrelados ao repo (principal); só o local
+  // onde o runner é escrito e onde o bun test roda pode variar (worktree).
+  const workDir = opts?.cwd ?? repoRoot;
   const storeFile = holdoutStorePath(repoRoot, task);
   if (!existsSync(storeFile)) return null;
 
@@ -461,10 +465,10 @@ export function runHoldout(
   }
 
   const runnerRel = holdoutRunnerPath(task);
-  const runnerAbs = join(repoRoot, runnerRel);
+  const runnerAbs = join(workDir, runnerRel);
   const importPath = relImportPath(
     dirname(runnerAbs),
-    join(repoRoot, target.module),
+    join(workDir, target.module),
   );
   const content = renderExamplesTest({
     task,
@@ -480,7 +484,7 @@ export function runHoldout(
 
     const t0 = Date.now();
     const res = Bun.spawnSync(["bun", "test", `./${runnerRel}`], {
-      cwd: repoRoot,
+      cwd: workDir,
       timeout: timeoutMs,
       stdout: "pipe",
       stderr: "pipe",

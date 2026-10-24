@@ -14,6 +14,7 @@ export const REASON_CODES = [
   "judge_rejected",
   "model_unattested",
   "overfit_holdout",
+  "test_passed_on_base",
 ] as const;
 export const MAX_RECEIPT_BYTES = 4096;
 export const MAX_TEXT = 280;
@@ -68,6 +69,7 @@ export type Receipt = {
   summary: string;
   created_at: string;
   flow?: string;
+  base_ref?: string;
   mode_effective?: Mode;
   mode_raised_by?: ModeRaisedBy;
   mode_override?: ModeOverride;
@@ -84,7 +86,10 @@ export type Receipt = {
   model_attested?: Attestation;
 };
 
-export function receiptKind(r: Pick<Receipt, "flow">): "verify" | "judge" {
+export function receiptKind(
+  r: Pick<Receipt, "flow">,
+): "verify" | "judge" | "prove_red" {
+  if (r.flow === "prove_red") return "prove_red";
   return r.flow === "judge" ? "judge" : "verify";
 }
 
@@ -277,6 +282,7 @@ export function validateReceipt(
       "summary",
       "created_at",
       "flow",
+      "base_ref",
       "mode_effective",
       "mode_raised_by",
       "mode_override",
@@ -456,6 +462,14 @@ export function validateReceipt(
     }
 
     checkOptionalString(x, "flow", msg);
+    if (x.base_ref !== undefined) {
+      if (
+        typeof x.base_ref !== "string" ||
+        !/^[0-9a-f]{40}$/.test(x.base_ref)
+      ) {
+        msg("invalid field: base_ref must be a 40 hex char sha");
+      }
+    }
     checkOptionalString(x, "checkpoint_ref", msg);
     checkOptionalString(x, "next_action", msg);
 

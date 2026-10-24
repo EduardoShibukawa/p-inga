@@ -14,6 +14,7 @@ import { changedFiles, evaluateGuards, findRedBase } from "./guards";
 import { currentBranch, parseOverride, resolveMode } from "./mode";
 import type { ModeDecision } from "./mode";
 import { parsePlan } from "./plan";
+import { PROVE_EXIT, proveBase } from "./prove";
 import type { ReasonCode, Receipt, Status } from "./receipt";
 import { resolveUsageFile, tokenFieldsFor } from "./tokens";
 import type { TokenFields } from "./tokens";
@@ -34,6 +35,7 @@ export type VerifyOptions = {
   usageFile?: string;
   overrideMode?: string;
   reason?: string;
+  proveBase?: boolean;
 };
 
 function tokenFieldsFromOptions(opts?: VerifyOptions): TokenFields {
@@ -91,6 +93,15 @@ export function verifyPlan(
       return 2;
     }
     resolvedBase = opts.base;
+  }
+
+  // --prove-base exige uma base resolvível: sem recibo se não houver.
+  if (opts?.proveBase === true) {
+    const baseShaEarly = resolvedBase ?? findRedBase(repoRoot, task);
+    if (baseShaEarly === null) {
+      console.error("sem base");
+      return 2;
+    }
   }
 
   const ledger = openLedger(ledgerPathArg ?? defaultLedgerPath());
@@ -192,6 +203,62 @@ export function verifyPlan(
       : plan.budget?.minutes
         ? plan.budget.minutes * 60_000
         : 30 * 60_000;
+
+    // I15: prova no base, antes de rodar o done_when no repo principal.
+    // Roda quando o modo efetivo é "completo" ou com --prove-base.
+    let provedBaseRef: string | null = null;
+    if (decision.effective === "completo" || opts?.proveBase === true) {
+      if (baseSha === null) {
+        // Só chega aqui em "completo" sem --prove-base (este já saiu com 2 antes).
+        console.error("prova no base pulada: sem commit RED");
+      } else {
+        const proof = proveBase(repoRoot, task, plan, baseSha, attempt, timeoutMs);
+        if (proof.verdict !== "proved") {
+          const inconclusive = proof.verdict === "inconclusive";
+          const sha7 = baseSha.slice(0, 7);
+          const blockStatus: Status = inconclusive ? "not run" : "blocked";
+          const blockReason: ReasonCode = inconclusive
+            ? "infra"
+            : "test_passed_on_base";
+          const summary = inconclusive
+            ? `${task} not run: prova inconclusiva no base ${sha7} (${proof.detail})`.slice(
+                0,
+                280,
+              )
+            : `${task} blocked: ${proof.which} passa no base ${sha7}; o teste não prova nada novo`.slice(
+                0,
+                280,
+              );
+          const tf = tokenFieldsFromOptions(opts);
+          const receipt: Receipt = {
+            v: 1,
+            type: "task.receipt",
+            id: randomUUID(),
+            task,
+            status: blockStatus,
+            reason_code: blockReason,
+            attempts: attempt,
+            evidence: proof.evidence,
+            tokens: tf.tokens,
+            cost_usd: tf.cost_usd,
+            cost_evidence: tf.cost_evidence,
+            author: authorFromEnv(),
+            verified_by: null,
+            ...modeFields,
+            base_ref: baseSha,
+            ...(inconclusive ? {} : { next_action: "reescrever o RED" }),
+            summary,
+            created_at: new Date().toISOString(),
+          };
+          ledger.append(receipt);
+          console.log(JSON.stringify(receipt));
+          return inconclusive
+            ? PROVE_EXIT.infra
+            : PROVE_EXIT.test_passed_on_base;
+        }
+        provedBaseRef = baseSha;
+      }
+    }
 
     const t0 = Date.now();
     const res = Bun.spawnSync(["sh", "-c", plan.done_when], {
@@ -350,6 +417,7 @@ export function verifyPlan(
       author: authorFromEnv(),
       verified_by: null,
       ...modeFields,
+      ...(provedBaseRef !== null ? { base_ref: provedBaseRef } : {}),
       ...(status === "pass" && decision.effective === "completo"
         ? { flow: "awaiting_judge", next_action: "pinga judge" }
         : {}),
