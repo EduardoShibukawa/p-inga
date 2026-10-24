@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { canonicalJson } from "./canonical";
 import type { Ledger } from "./ledger";
 import type { ReasonCode, Receipt } from "./receipt";
+import { receiptKind } from "./receipt";
 
 export const BREAKER_EXIT = 4;
 export const BREAKER_NEXT_ACTION = "escalar ao dono";
@@ -22,10 +23,13 @@ export function computeFailureSignature(f: FailureInput): string {
 }
 
 export function lastReceiptFor(ledger: Ledger, task: string): Receipt | null {
-  const rows = ledger.all().filter((r) => r.task === task);
-  if (rows.length === 0) return null;
-  const last = rows[rows.length - 1]!;
-  return JSON.parse(last.body) as Receipt;
+  const receipts = ledger
+    .all()
+    .filter((r) => r.task === task)
+    .map((r) => JSON.parse(r.body) as Receipt)
+    .filter((rcpt) => receiptKind(rcpt) === "verify");
+  if (receipts.length === 0) return null;
+  return receipts[receipts.length - 1]!;
 }
 
 export function shouldTrip(prev: Receipt | null, signature: string): boolean {

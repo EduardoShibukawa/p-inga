@@ -1,4 +1,4 @@
 #!/usr/bin/env bun
 import { runCli } from "../src/cli";
 
-process.exitCode = runCli(process.argv.slice(2));
+process.exitCode = await runCli(process.argv.slice(2));

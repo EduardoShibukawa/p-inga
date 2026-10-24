@@ -4,6 +4,7 @@ import { alwaysAllowed, changedFiles, findRedBase } from "./guards";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { parsePlan } from "./plan";
 import type { Receipt, Status } from "./receipt";
+import { receiptKind } from "./receipt";
 
 export const PLANNER_DEFAULT = { model: "gemini-4-argon", family: "gemini" } as const;
 
@@ -267,9 +268,9 @@ export function evalPlan(
   }
 
   const ledger = openLedger(opts?.ledgerPath ?? defaultLedgerPath());
-  let receipts: Receipt[];
+  let allTaskReceipts: Receipt[];
   try {
-    receipts = ledger
+    allTaskReceipts = ledger
       .all()
       .filter((row) => row.task === task)
       .map((row) => JSON.parse(row.body) as Receipt);
@@ -277,23 +278,26 @@ export function evalPlan(
     ledger.close();
   }
 
-  if (receipts.length === 0) {
+  const verifyReceipts = allTaskReceipts.filter(
+    (r) => receiptKind(r) === "verify",
+  );
+  if (verifyReceipts.length === 0) {
     console.error(`sem recibos para ${task}`);
     return 1;
   }
 
-  const last = receipts[receipts.length - 1]!;
-  const status = last.status;
-  const attempts = receipts.length;
-  const totalDurationMs = receipts.reduce(
+  const lastVerify = verifyReceipts[verifyReceipts.length - 1]!;
+  const status = lastVerify.status;
+  const attempts = verifyReceipts.length;
+  const totalDurationMs = verifyReceipts.reduce(
     (acc, r) => acc + r.evidence.reduce((a, e) => a + e.duration_ms, 0),
     0,
   );
   const minutes = Math.ceil(totalDurationMs / 60000);
-  const tokens = summarizeTokens(receipts);
+  const tokens = summarizeTokens(allTaskReceipts);
 
-  const execModel = last.author.model ?? "desconhecido";
-  const execFamily = last.author.family ?? "desconhecida";
+  const execModel = lastVerify.author.model ?? "desconhecido";
+  const execFamily = lastVerify.author.family ?? "desconhecida";
   const executor = `${execModel} (${execFamily})`;
 
   const envModel = process.env.PINGA_PLANNER_MODEL;
@@ -339,17 +343,23 @@ export function evalPlan(
     };
   }
 
-  // Preservação de parecer e dono do EVAL.md existente.
+  // Parecer: recibo do juiz tem precedência sobre a regra de família da T07.
+  const judgeReceipts = allTaskReceipts.filter(
+    (r) => receiptKind(r) === "judge",
+  );
+  let parecer: string;
   const existing = existsSync(evalPath)
     ? extractOwnerFields(readFileSync(evalPath, "utf8"))
     : { bom: "", ruim: "", mudar: "", parecer: null as string | null };
-  const parecer =
-    last.author.family !== null && last.author.family === planFamily
-      ? "n/a: mesma família"
-      : existing.parecer && existing.parecer !== "n/a: mesma família"
-        ? existing.parecer
-        : "pendente";
-
+  if (judgeReceipts.length > 0) {
+    parecer = judgeReceipts[judgeReceipts.length - 1]!.summary;
+  } else if (lastVerify.author.family !== null && lastVerify.author.family === planFamily) {
+    parecer = "n/a: mesma família";
+  } else if (existing.parecer && existing.parecer !== "n/a: mesma família") {
+    parecer = existing.parecer;
+  } else {
+    parecer = "pendente";
+  }
   const doc: EvalDoc = {
     task,
     executor,

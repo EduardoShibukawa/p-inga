@@ -9,6 +9,8 @@ export const REASON_CODES = [
   "same_family_judge",
   "infra",
   "not_executed",
+  "judge_rejected",
+  "model_unattested",
 ] as const;
 export const MAX_RECEIPT_BYTES = 4096;
 export const MAX_TEXT = 280;
@@ -27,6 +29,12 @@ export type Evidence = {
   exit: number | null;
   duration_ms: number;
   artifact_ref: ArtifactRef | null;
+};
+
+export type Attestation = {
+  claimed: string | null;
+  served: string;
+  via: "/v1/models" | "transcript";
 };
 
 export type Receipt = {
@@ -68,7 +76,12 @@ export type Receipt = {
     text: string;
     options: string[];
   };
+  model_attested?: Attestation;
 };
+
+export function receiptKind(r: Pick<Receipt, "flow">): "verify" | "judge" {
+  return r.flow === "judge" ? "judge" : "verify";
+}
 
 type Err = (msg: string) => void;
 
@@ -264,6 +277,7 @@ export function validateReceipt(
       "checkpoint_ref",
       "next_action",
       "question",
+      "model_attested",
     ]);
     for (const key of Object.keys(x)) {
       if (!allowedRoot.has(key)) msg(`unknown field: ${key}`);
@@ -374,6 +388,43 @@ export function validateReceipt(
     checkOptionalString(x, "mode_effective", msg);
     checkOptionalString(x, "checkpoint_ref", msg);
     checkOptionalString(x, "next_action", msg);
+
+    if (x.model_attested !== undefined) {
+      const a = x.model_attested;
+      if (!isPlainObject(a)) {
+        msg("invalid field: model_attested must be an object");
+      } else {
+        for (const key of Object.keys(a)) {
+          if (key !== "claimed" && key !== "served" && key !== "via") {
+            msg(`unknown field: model_attested.${key}`);
+          }
+        }
+        if (!("claimed" in a)) {
+          msg("missing field: model_attested.claimed");
+        } else if (
+          a.claimed !== null &&
+          (typeof a.claimed !== "string" || a.claimed.length === 0)
+        ) {
+          msg(
+            "invalid field: model_attested.claimed must be a non-empty string or null",
+          );
+        }
+        if (!("served" in a)) {
+          msg("missing field: model_attested.served");
+        } else if (typeof a.served !== "string" || a.served.length === 0) {
+          msg(
+            "invalid field: model_attested.served must be a non-empty string",
+          );
+        }
+        if (!("via" in a)) {
+          msg("missing field: model_attested.via");
+        } else if (a.via !== "/v1/models" && a.via !== "transcript") {
+          msg(
+            'invalid field: model_attested.via must be "/v1/models" or "transcript"',
+          );
+        }
+      }
+    }
 
     if (x.breaker !== undefined) {
       const b = x.breaker;

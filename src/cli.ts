@@ -1,14 +1,16 @@
 import { evalPlan } from "./eval";
+import { judgePlan } from "./judge";
 import { precommitDecision } from "./guards";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { verifyPlan } from "./verify";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH]
+       pinga judge <PLAN.md> [--ledger PATH] [--judge-model M] [--endpoint URL] [--base SHA] [--usage-file PATH]
        pinga eval <PLAN.md> [--ledger PATH] [--check]
        pinga precommit [-- <cmd...>]`;
 
-export function runCli(argv: string[]): number {
+export function runCli(argv: string[]): number | Promise<number> {
   const [command, subcommand, ...rest] = argv;
 
   if (command === "ledger" && subcommand === "verify") {
@@ -91,6 +93,50 @@ export function runCli(argv: string[]): number {
     }
 
     return verifyPlan(planPath, ledgerPath, attempt, { base, usageFile });
+  }
+
+  if (command === "judge") {
+    const planPath = subcommand;
+    if (planPath === undefined || planPath === "" || planPath.startsWith("--")) {
+      console.error(USAGE);
+      return 2;
+    }
+
+    let ledgerPath: string | undefined;
+    let judgeModel: string | undefined;
+    let endpoint: string | undefined;
+    let base: string | undefined;
+    let usageFile: string | undefined;
+
+    const valueFlags = new Set([
+      "--ledger",
+      "--judge-model",
+      "--endpoint",
+      "--base",
+      "--usage-file",
+    ]);
+
+    for (let i = 0; i < rest.length; i++) {
+      const arg = rest[i];
+      if (valueFlags.has(arg)) {
+        const value = rest[i + 1];
+        if (value === undefined || value === "" || value.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        if (arg === "--ledger") ledgerPath = value;
+        else if (arg === "--judge-model") judgeModel = value;
+        else if (arg === "--endpoint") endpoint = value;
+        else if (arg === "--base") base = value;
+        else if (arg === "--usage-file") usageFile = value;
+        i++;
+      } else {
+        console.error(USAGE);
+        return 2;
+      }
+    }
+
+    return judgePlan(planPath, { ledgerPath, judgeModel, endpoint, base, usageFile });
   }
 
   if (command === "eval") {
