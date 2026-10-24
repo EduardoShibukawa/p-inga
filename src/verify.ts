@@ -10,6 +10,8 @@ import {
 } from "./breaker";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { changedFiles, evaluateGuards, findRedBase } from "./guards";
+import { currentBranch, parseOverride, resolveMode } from "./mode";
+import type { ModeDecision } from "./mode";
 import { parsePlan } from "./plan";
 import type { ReasonCode, Receipt, Status } from "./receipt";
 import { resolveUsageFile, tokenFieldsFor } from "./tokens";
@@ -26,7 +28,12 @@ function authorFromEnv(): { model: string | null; family: string | null } {
   };
 }
 
-export type VerifyOptions = { base?: string; usageFile?: string };
+export type VerifyOptions = {
+  base?: string;
+  usageFile?: string;
+  overrideMode?: string;
+  reason?: string;
+};
 
 function tokenFieldsFromOptions(opts?: VerifyOptions): TokenFields {
   const usagePath = resolveUsageFile(opts?.usageFile);
@@ -58,6 +65,12 @@ export function verifyPlan(
     gitRoot.exitCode === 0
       ? gitRoot.stdout.toString().trim()
       : dirname(resolvedPlanPath);
+
+  const parsedOverride = parseOverride(opts?.overrideMode, opts?.reason);
+  if (!parsedOverride.ok) {
+    console.error(parsedOverride.error);
+    return 2;
+  }
 
   // Validação de --base: nenhuma gravação no ledger antes de OK.
   let resolvedBase: string | undefined;
@@ -118,8 +131,25 @@ export function verifyPlan(
     const plan = parsed.plan;
 
     const baseSha = resolvedBase ?? findRedBase(repoRoot, task);
+    const changed = baseSha !== null ? changedFiles(repoRoot, baseSha) : [];
+
+    // Decisão de modo: todo recibo gerado a partir daqui carrega os campos.
+    const decision: ModeDecision = resolveMode({
+      requested: plan.mode,
+      paths: Array.from(new Set([...(plan.touch ?? []), ...changed])),
+      branch: currentBranch(repoRoot),
+      env: process.env,
+      override: parsedOverride.override,
+    });
+    const modeFields = {
+      mode_effective: decision.effective,
+      mode_raised_by: decision.raised_by,
+      ...(decision.override !== null
+        ? { mode_override: decision.override }
+        : {}),
+    };
+
     if (baseSha !== null) {
-      const changed = changedFiles(repoRoot, baseSha);
       const guardRes = evaluateGuards({
         task,
         touch: plan.touch,
@@ -146,6 +176,7 @@ export function verifyPlan(
           cost_evidence: tf.cost_evidence,
           author: authorFromEnv(),
           verified_by: null,
+          ...modeFields,
           summary: summary.slice(0, 280),
           created_at: new Date().toISOString(),
         };
@@ -261,6 +292,10 @@ export function verifyPlan(
       cost_evidence: tf.cost_evidence,
       author: authorFromEnv(),
       verified_by: null,
+      ...modeFields,
+      ...(status === "pass" && decision.effective === "completo"
+        ? { flow: "awaiting_judge", next_action: "pinga judge" }
+        : {}),
       ...(breaker !== undefined ? { breaker } : {}),
       ...(breaker?.tripped ? { next_action: BREAKER_NEXT_ACTION } : {}),
       summary,

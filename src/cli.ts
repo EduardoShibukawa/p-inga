@@ -1,11 +1,13 @@
 import { evalPlan } from "./eval";
 import { judgePlan } from "./judge";
+import { modePlan } from "./mode";
 import { precommitDecision } from "./guards";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { verifyPlan } from "./verify";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
-       pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH]
+       pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO]
+       pinga mode <PLAN.md> [--base SHA] [--override-mode M --reason TEXTO]
        pinga judge <PLAN.md> [--ledger PATH] [--judge-model M] [--endpoint URL] [--base SHA] [--usage-file PATH]
        pinga eval <PLAN.md> [--ledger PATH] [--check]
        pinga precommit [-- <cmd...>]`;
@@ -50,6 +52,8 @@ export function runCli(argv: string[]): number | Promise<number> {
     let attempt: number | undefined;
     let base: string | undefined;
     let usageFile: string | undefined;
+    let overrideMode: string | undefined;
+    let reason: string | undefined;
 
     for (let i = 0; i < rest.length; i++) {
       const arg = rest[i];
@@ -86,13 +90,80 @@ export function runCli(argv: string[]): number | Promise<number> {
         }
         usageFile = value;
         i++;
+      } else if (arg === "--override-mode") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "" || value.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        overrideMode = value;
+        i++;
+      } else if (arg === "--reason") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "") {
+          console.error(USAGE);
+          return 2;
+        }
+        reason = value;
+        i++;
       } else {
         console.error(USAGE);
         return 2;
       }
     }
 
-    return verifyPlan(planPath, ledgerPath, attempt, { base, usageFile });
+    return verifyPlan(planPath, ledgerPath, attempt, {
+      base,
+      usageFile,
+      overrideMode,
+      reason,
+    });
+  }
+
+  if (command === "mode") {
+    const planPath = subcommand;
+    if (planPath === undefined || planPath === "" || planPath.startsWith("--")) {
+      console.error(USAGE);
+      return 2;
+    }
+
+    let base: string | undefined;
+    let overrideMode: string | undefined;
+    let reason: string | undefined;
+
+    for (let i = 0; i < rest.length; i++) {
+      const arg = rest[i];
+      if (arg === "--base") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "" || value.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        base = value;
+        i++;
+      } else if (arg === "--override-mode") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "" || value.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        overrideMode = value;
+        i++;
+      } else if (arg === "--reason") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "") {
+          console.error(USAGE);
+          return 2;
+        }
+        reason = value;
+        i++;
+      } else {
+        console.error(USAGE);
+        return 2;
+      }
+    }
+
+    return modePlan(planPath, { base, overrideMode, reason });
   }
 
   if (command === "judge") {

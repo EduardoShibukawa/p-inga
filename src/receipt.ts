@@ -1,3 +1,5 @@
+import { MODES, type Mode, type ModeOverride, MODE_RAISED_BY, type ModeRaisedBy } from "./mode";
+
 export const STATUSES = ["pass", "fail", "blocked", "not run"] as const;
 export const REASON_CODES = [
   "command_failed",
@@ -65,7 +67,9 @@ export type Receipt = {
   summary: string;
   created_at: string;
   flow?: string;
-  mode_effective?: string;
+  mode_effective?: Mode;
+  mode_raised_by?: ModeRaisedBy;
+  mode_override?: ModeOverride;
   breaker?: {
     tripped: boolean;
     failure_signature: string | null;
@@ -273,6 +277,8 @@ export function validateReceipt(
       "created_at",
       "flow",
       "mode_effective",
+      "mode_raised_by",
+      "mode_override",
       "breaker",
       "checkpoint_ref",
       "next_action",
@@ -384,8 +390,71 @@ export function validateReceipt(
       msg("invalid field: created_at must be a valid ISO 8601 string");
     }
 
+    if (x.mode_effective !== undefined) {
+      if (
+        typeof x.mode_effective !== "string" ||
+        !MODES.includes(x.mode_effective as Mode)
+      ) {
+        msg(`invalid field: mode_effective must be one of ${MODES.join(", ")}`);
+      }
+    }
+
+    if (x.mode_raised_by !== undefined) {
+      if (
+        typeof x.mode_raised_by !== "string" ||
+        !MODE_RAISED_BY.includes(x.mode_raised_by as ModeRaisedBy)
+      ) {
+        msg(
+          `invalid field: mode_raised_by must be one of ${MODE_RAISED_BY.join(", ")}`,
+        );
+      }
+    }
+
+    if (x.mode_override !== undefined) {
+      const o = x.mode_override;
+      if (!isPlainObject(o)) {
+        msg("invalid field: mode_override must be an object");
+      } else {
+        const allowed = new Set(["from", "to", "reason"]);
+        for (const key of Object.keys(o)) {
+          if (!allowed.has(key)) msg(`unknown field: mode_override.${key}`);
+        }
+        if (!("from" in o)) msg("missing field: mode_override.from");
+        else if (typeof o.from !== "string" || !MODES.includes(o.from as Mode)) {
+          msg(
+            `invalid field: mode_override.from must be one of ${MODES.join(", ")}`,
+          );
+        }
+        if (!("to" in o)) msg("missing field: mode_override.to");
+        else if (typeof o.to !== "string" || !MODES.includes(o.to as Mode)) {
+          msg(
+            `invalid field: mode_override.to must be one of ${MODES.join(", ")}`,
+          );
+        }
+        if (!("reason" in o)) msg("missing field: mode_override.reason");
+        else if (
+          typeof o.reason !== "string" ||
+          o.reason.trim().length < 1 ||
+          o.reason.length > 280
+        ) {
+          msg(
+            "invalid field: mode_override.reason must be a string with 1..280 chars",
+          );
+        }
+      }
+    }
+
+    const raisedIsOverride = x.mode_raised_by === "operator_override";
+    const hasOverride = x.mode_override !== undefined;
+    if (raisedIsOverride !== hasOverride) {
+      msg(
+        raisedIsOverride
+          ? "invalid field: mode_raised_by operator_override requires mode_override"
+          : "invalid field: mode_override requires mode_raised_by operator_override",
+      );
+    }
+
     checkOptionalString(x, "flow", msg);
-    checkOptionalString(x, "mode_effective", msg);
     checkOptionalString(x, "checkpoint_ref", msg);
     checkOptionalString(x, "next_action", msg);
 
