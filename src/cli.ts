@@ -1,8 +1,10 @@
+import { precommitDecision } from "./guards";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { verifyPlan } from "./verify";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
-       pinga verify <PLAN.md> [--ledger PATH] [--attempt N]`;
+       pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA]
+       pinga precommit [-- <cmd...>]`;
 
 export function runCli(argv: string[]): number {
   const [command, subcommand, ...rest] = argv;
@@ -42,6 +44,7 @@ export function runCli(argv: string[]): number {
 
     let ledgerPath: string | undefined;
     let attempt: number | undefined;
+    let base: string | undefined;
 
     for (let i = 0; i < rest.length; i++) {
       const arg = rest[i];
@@ -62,13 +65,50 @@ export function runCli(argv: string[]): number {
         }
         attempt = n;
         i++;
+      } else if (arg === "--base") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "" || value.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        base = value;
+        i++;
       } else {
         console.error(USAGE);
         return 2;
       }
     }
 
-    return verifyPlan(planPath, ledgerPath, attempt);
+    return verifyPlan(planPath, ledgerPath, attempt, { base });
+  }
+
+  if (command === "precommit") {
+    const sep = argv.indexOf("--");
+    const cmd =
+      sep !== -1
+        ? argv.slice(sep + 1)
+        : argv.filter((arg) => arg !== "precommit");
+    if (cmd.length === 0) cmd.push("bun", "test");
+
+    const staged = Bun.spawnSync(
+      ["git", "diff", "--cached", "--name-only"],
+      { cwd: process.cwd(), stdout: "pipe", stderr: "pipe" },
+    );
+    const stagedList =
+      staged.exitCode === 0
+        ? staged.stdout.toString().split("\n").filter((l) => l.length > 0)
+        : [];
+
+    if (precommitDecision(stagedList) === "skip") {
+      console.log("precommit: só tests/, tasks/ e specs/ staged; suíte pulada");
+      return 0;
+    }
+
+    const res = Bun.spawnSync(cmd, {
+      cwd: process.cwd(),
+      stdio: ["inherit", "inherit", "inherit"],
+    });
+    return res.exitCode ?? 1;
   }
 
   console.error(USAGE);

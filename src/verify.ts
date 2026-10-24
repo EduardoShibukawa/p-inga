@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { defaultLedgerPath, openLedger } from "./ledger";
+import { changedFiles, evaluateGuards, findRedBase } from "./guards";
 import { parsePlan } from "./plan";
 import type { ReasonCode, Receipt, Status } from "./receipt";
 
@@ -16,13 +17,49 @@ function authorFromEnv(): { model: string | null; family: string | null } {
   };
 }
 
+export type VerifyOptions = { base?: string };
+
 export function verifyPlan(
   planPath: string,
   ledgerPathArg?: string,
   attemptArg?: number,
+  opts?: VerifyOptions,
 ): number {
   const resolvedPlanPath = resolve(planPath);
   const task = basename(dirname(resolvedPlanPath));
+
+  const gitRoot = Bun.spawnSync(
+    ["git", "rev-parse", "--show-toplevel"],
+    {
+      cwd: dirname(resolvedPlanPath),
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  const repoRoot =
+    gitRoot.exitCode === 0
+      ? gitRoot.stdout.toString().trim()
+      : dirname(resolvedPlanPath);
+
+  // Validação de --base: nenhuma gravação no ledger antes de OK.
+  let resolvedBase: string | undefined;
+  if (opts?.base !== undefined) {
+    const check = Bun.spawnSync(
+      [
+        "git",
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        `${opts.base}^{commit}`,
+      ],
+      { cwd: repoRoot, stdout: "pipe", stderr: "pipe" },
+    );
+    if (check.exitCode !== 0) {
+      console.error(`base inválida: ${opts.base}`);
+      return 2;
+    }
+    resolvedBase = opts.base;
+  }
 
   const ledger = openLedger(ledgerPathArg ?? defaultLedgerPath());
 
@@ -61,18 +98,42 @@ export function verifyPlan(
 
     const plan = parsed.plan;
 
-    const gitRoot = Bun.spawnSync(
-      ["git", "rev-parse", "--show-toplevel"],
-      {
-        cwd: dirname(resolvedPlanPath),
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    );
-    const repoRoot =
-      gitRoot.exitCode === 0
-        ? gitRoot.stdout.toString().trim()
-        : dirname(resolvedPlanPath);
+    const baseSha = resolvedBase ?? findRedBase(repoRoot, task);
+    if (baseSha !== null) {
+      const changed = changedFiles(repoRoot, baseSha);
+      const guardRes = evaluateGuards({
+        task,
+        touch: plan.touch,
+        tests_frozen: plan.tests_frozen,
+        changed,
+      });
+      if (!guardRes.ok) {
+        const summary =
+          guardRes.reason_code === "tests_frozen_changed"
+            ? `${task} blocked: tests_frozen alterado (${guardRes.files.join(", ")})`
+            : `${task} blocked: fora do touch (${guardRes.files.join(", ")})`;
+        const receipt: Receipt = {
+          v: 1,
+          type: "task.receipt",
+          id: randomUUID(),
+          task,
+          status: "blocked",
+          reason_code: guardRes.reason_code,
+          attempts: attempt,
+          evidence: [],
+          tokens: { in: null, out: null, cache: null, source: null },
+          cost_usd: null,
+          cost_evidence: "not run",
+          author: authorFromEnv(),
+          verified_by: null,
+          summary: summary.slice(0, 280),
+          created_at: new Date().toISOString(),
+        };
+        ledger.append(receipt);
+        console.log(JSON.stringify(receipt));
+        return guardRes.exit;
+      }
+    }
 
     const timeoutMs = process.env.PINGA_TIMEOUT_MS
       ? Number(process.env.PINGA_TIMEOUT_MS)

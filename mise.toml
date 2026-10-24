@@ -1,9 +1,10 @@
 [tools]
 bun = "1.4.4"
 hk = "1.24.0"
+pkl = "0.32.1"
 
 [tasks.pre-commit]
-run = "bun test"
+run = "bun bin/pinga.ts precommit -- bun test"
 
 [tasks.stable]
 run = "bun scripts/stable.ts"
