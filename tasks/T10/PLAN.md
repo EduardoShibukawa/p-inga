@@ -7,11 +7,11 @@ tests_frozen: ["tests/examples.test.ts", "tests/mode.test.ts", "tests/judge.test
 budget: { tokens: 350000, minutes: 90 }
 ---
 ## Passos
-- [ ] commit RED: tests/examples.test.ts + overfit_holdout em tests/receipt.test.ts; PARE para revisão
-- [ ] GREEN: src/examples.ts (parse, partição, render, holdout store, runHoldout); cli ganha `examples`
-- [ ] GREEN: verify.ts roda o holdout depois de um done_when pass; receipt.ts ganha o reason_code
-- [ ] commit GREEN com caminhos explícitos; mise run stable
-- [ ] fechar: pinga-stable verify, pinga-stable judge e eval de tasks/T10/PLAN.md
+- [x] commit RED: tests/examples.test.ts + overfit_holdout em tests/receipt.test.ts; PARE para revisão
+- [x] GREEN: src/examples.ts (parse, partição, render, holdout store, runHoldout); cli ganha `examples`
+- [x] GREEN: verify.ts roda o holdout depois de um done_when pass; receipt.ts ganha o reason_code
+- [x] commit GREEN com caminhos explícitos; mise run stable
+- [x] fechar: pinga-stable verify, pinga-stable judge e eval de tasks/T10/PLAN.md
 
 ## Dívidas conscientes
 - holdout oculto por convenção (D12): um operário com shell pode ler PINGA_HOLDOUT_DIR
