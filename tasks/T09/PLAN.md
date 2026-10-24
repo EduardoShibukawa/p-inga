@@ -7,11 +7,11 @@ tests_frozen: ["tests/mode.test.ts", "tests/judge.test.ts", "tests/eval.test.ts"
 budget: { tokens: 300000, minutes: 75 }
 ---
 ## Passos
-- [ ] commit RED: tests/mode.test.ts com os casos de RED.md; PARE para revisão
-- [ ] GREEN: src/mode.ts (regras, resolveMode, currentBranch, modePlan); receipt.ts valida mode_*
-- [ ] GREEN: verify.ts anexa a decisão a todo recibo de plano válido; completo + pass → awaiting_judge
-- [ ] commit GREEN com caminhos explícitos; mise run stable
-- [ ] fechar: pinga-stable verify, pinga-stable judge (juiz ≠ executor) e eval de tasks/T09/PLAN.md
+- [x] commit RED: tests/mode.test.ts com os casos de RED.md; PARE para revisão
+- [x] GREEN: src/mode.ts (regras, resolveMode, currentBranch, modePlan); receipt.ts valida mode_*
+- [x] GREEN: verify.ts anexa a decisão a todo recibo de plano válido; completo + pass → awaiting_judge
+- [x] commit GREEN com caminhos explícitos; mise run stable
+- [x] fechar: pinga-stable verify, pinga-stable judge (juiz ≠ executor) e eval de tasks/T09/PLAN.md
 
 ## Dívidas conscientes
 - sinais por glob de caminho: falso positivo sobe o modo (barato); sem análise de conteúdo
