@@ -7,11 +7,11 @@ tests_frozen: ["tests/prove.test.ts", "tests/examples.test.ts", "tests/mode.test
 budget: { tokens: 350000, minutes: 90 }
 ---
 ## Passos
-- [ ] commit RED: tests/prove.test.ts + test_passed_on_base em tests/receipt.test.ts; PARE para revisão
-- [ ] GREEN: src/prove.ts (classify, worktree temporária, overlay, sweep, provePlan); cli ganha `prove-red`
-- [ ] GREEN: verify prova antes do done_when em completo ou --prove-base; runHoldout ganha cwd; base_ref no recibo
-- [ ] commit GREEN com caminhos explícitos; mise run stable; provas retroativas T08–T11 (AC-P)
-- [ ] fechar: pinga-stable verify, pinga-stable judge e eval de tasks/T11/PLAN.md
+- [x] commit RED: tests/prove.test.ts + test_passed_on_base em tests/receipt.test.ts; PARE para revisão
+- [x] GREEN: src/prove.ts (classify, worktree temporária, overlay, sweep, provePlan); cli ganha `prove-red`
+- [x] GREEN: verify prova antes do done_when em completo ou --prove-base; runHoldout ganha cwd; base_ref no recibo
+- [x] commit GREEN com caminhos explícitos; mise run stable; provas retroativas T08–T11 (AC-P)
+- [x] fechar: pinga-stable verify, pinga-stable judge e eval de tasks/T11/PLAN.md
 
 ## Dívidas conscientes
 - falhar no base não prova que o teste é forte (sem mutação); só que não é vazio
