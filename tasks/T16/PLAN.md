@@ -16,7 +16,7 @@ holdout_rule: "sha256 partition >= 4 visible + 2 holdout"
 examples_cmd: "pinga examples tasks/T16/PLAN.md --from /tmp/pinga-examples/T16.yaml"
 ---
 ## Passos
-- [ ] RED: tests/multi-ingest.test.ts; prove-red exit 0; GREEN: transcript/learn/cli; eval
+- [x] RED: tests/multi-ingest.test.ts; prove-red exit 0; GREEN: transcript/learn/cli; eval
 ## Exemplos (gerados antes do código)
 1. in: pi-tool -> out: ok; 2. in: pi-stop -> out: ok; 3. in: opencode -> out: ok
 4. in: hermes -> out: ok; 5. in: friction -> out: ok; 6. in: auth.json -> out: error
