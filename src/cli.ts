@@ -16,6 +16,12 @@ import { promoteCmd, proposeCmd } from "./lessons";
 import { auditNoVerify, evaluateLessonsPrecision } from "./audit";
 import { loadDenylist, redact } from "./redact";
 import { resolve } from "node:path";
+import {
+  computeWorkerScoreboard,
+  createTaskRequest,
+  formatMaestroDigest,
+  recommendOrchestration,
+} from "./maestro";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base]
@@ -33,7 +39,11 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga precommit [-- <cmd...>]
        pinga install (--dry-run | --apply | --revert) [--only H] [--manifest PATH] [--home PATH]
        pinga adopt (--dry-run | --apply) [--home PATH] [--manifest PATH]
-       pinga doctor [--json] [--only H] [--endpoint URL] [--home PATH] [--manifest PATH]`;
+       pinga doctor [--json] [--only H] [--endpoint URL] [--home PATH] [--manifest PATH]
+       pinga maestro scoreboard [--ledger PATH] [--db PATH] [--json]
+       pinga maestro recommend <PLAN.md> [--ledger PATH] [--db PATH] [--json]
+       pinga maestro envelope <PLAN.md> [--ledger PATH] [--json]
+       pinga maestro digest [--ledger PATH] [--db PATH] [--send] [--json]`;
 
 /**
  * `pinga learn scan <arquivo...>`: aplica o scanner a cada arquivo e imprime
@@ -933,6 +943,119 @@ export async function runCli(argv: string[]): Promise<number> {
       env: cleanGitEnv(),
     });
     return res.exitCode ?? 1;
+  }
+
+  if (command === "maestro") {
+    const sub = argv[1];
+    if (sub === "scoreboard") {
+      let ledgerPath: string | undefined;
+      let dbPath: string | undefined;
+      let json = false;
+      for (let i = 2; i < argv.length; i++) {
+        const arg = argv[i];
+        if (arg === "--ledger") {
+          ledgerPath = argv[++i];
+        } else if (arg === "--db") {
+          dbPath = argv[++i];
+        } else if (arg === "--json") {
+          json = true;
+        }
+      }
+      const scoreboard = await computeWorkerScoreboard(ledgerPath, dbPath);
+      if (json) {
+        console.log(JSON.stringify(scoreboard, null, 2));
+      } else {
+        console.log(formatMaestroDigest(scoreboard, []));
+      }
+      return 0;
+    }
+
+    if (sub === "recommend") {
+      let planPath: string | undefined;
+      let ledgerPath: string | undefined;
+      let dbPath: string | undefined;
+      let json = false;
+      for (let i = 2; i < argv.length; i++) {
+        const arg = argv[i];
+        if (arg === "--ledger") {
+          ledgerPath = argv[++i];
+        } else if (arg === "--db") {
+          dbPath = argv[++i];
+        } else if (arg === "--json") {
+          json = true;
+        } else if (!arg.startsWith("--") && !planPath) {
+          planPath = arg;
+        }
+      }
+      if (!planPath) {
+        console.error(USAGE);
+        return 2;
+      }
+      const scoreboard = await computeWorkerScoreboard(ledgerPath, dbPath);
+      const rec = recommendOrchestration(planPath, scoreboard);
+      if (json) {
+        console.log(JSON.stringify(rec, null, 2));
+      } else {
+        console.log(`Recomendação Maestro:`);
+        console.log(`- Topologia: ${rec.topology}`);
+        console.log(`- Operário: ${rec.recommended_worker ?? "nenhum"}`);
+        console.log(`- Motivo: ${rec.reason}`);
+      }
+      return 0;
+    }
+
+    if (sub === "envelope") {
+      let planPath: string | undefined;
+      let ledgerPath: string | undefined;
+      let json = false;
+      for (let i = 2; i < argv.length; i++) {
+        const arg = argv[i];
+        if (arg === "--ledger") {
+          ledgerPath = argv[++i];
+        } else if (arg === "--json") {
+          json = true;
+        } else if (!arg.startsWith("--") && !planPath) {
+          planPath = arg;
+        }
+      }
+      if (!planPath) {
+        console.error(USAGE);
+        return 2;
+      }
+      const envelope = createTaskRequest(planPath);
+      console.log(JSON.stringify(envelope, null, 2));
+      return 0;
+    }
+
+    if (sub === "digest") {
+      let ledgerPath: string | undefined;
+      let dbPath: string | undefined;
+      let json = false;
+      let send = false;
+      for (let i = 2; i < argv.length; i++) {
+        const arg = argv[i];
+        if (arg === "--ledger") {
+          ledgerPath = argv[++i];
+        } else if (arg === "--db") {
+          dbPath = argv[++i];
+        } else if (arg === "--json") {
+          json = true;
+        } else if (arg === "--send") {
+          send = true;
+        }
+      }
+      const scoreboard = await computeWorkerScoreboard(ledgerPath, dbPath);
+      const digest = formatMaestroDigest(scoreboard, []);
+      if (json) {
+        console.log(JSON.stringify({ scoreboard, digest }, null, 2));
+      } else {
+        console.log(digest);
+      }
+      return 0;
+    }
+
+    console.error(USAGE);
+    return 2;
   }
 
   console.error(USAGE);
