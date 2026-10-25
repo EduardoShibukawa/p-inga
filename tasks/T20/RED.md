@@ -59,6 +59,8 @@ export type Scoreboard = {
   workers: WorkerStats[];
 };
 
+export function truncateEnvelopeString(s: string, maxBytes: number): string;
+
 export function createTaskRequest(planPath: string, opts?: { origin?: "operator" | "hermes" | "cron"; replyTo?: string }): TaskRequestEnvelope;
 
 export function buildMaestroEnvelope(receipt: unknown, scoreboard?: Scoreboard): MaestroReceiptEnvelope;

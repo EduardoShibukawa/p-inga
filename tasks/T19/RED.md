@@ -48,6 +48,12 @@ export type LessonPrecisionResult = {
   }>;
 };
 
+export function computeAuditGate(input: {
+  sample_size: number;
+  useful_count: number;
+  threshold?: number;
+}): boolean;
+
 export function auditNoVerify(db: Database, repoPath?: string): Promise<NoVerifyAuditResult>;
 
 export function evaluateLessonsPrecision(

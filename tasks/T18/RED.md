@@ -37,6 +37,13 @@ export type AdoptResult = {
   backups_created: string[];
 };
 
+export function classifyAdoptTarget(input: {
+  target: string;
+  exists: boolean;
+  is_owned: boolean;
+  is_broken_symlink: boolean;
+}): "adoptable" | "broken_symlink" | "already_owned" | "missing" | "ignored";
+
 export function inspectAdoptableEntries(homeDir: string, manifestPath: string): Promise<AdoptableTarget[]>;
 
 export function adoptLocalEntries(opts: {
