@@ -1,0 +1,23 @@
+target:
+  module: "src/transcript.ts"
+  export: "isForbiddenPath"
+holdout: 2
+examples:
+  - name: "ex-1-auth-json"
+    input: ["~/.pi/agent/auth.json"]
+    output: true
+  - name: "ex-2-env-file"
+    input: ["~/.hermes/.env"]
+    output: true
+  - name: "ex-3-credentials"
+    input: ["/etc/ssl/certs/credentials.json"]
+    output: true
+  - name: "ex-4-secrets-dir"
+    input: ["/home/user/project/secrets/api_key.txt"]
+    output: true
+  - name: "ex-5-valid-transcript"
+    input: ["/home/user/.pi/agent/sessions/abc.jsonl"]
+    output: false
+  - name: "ex-6-valid-markdown"
+    input: ["/home/user/project/FRICTION.md"]
+    output: false

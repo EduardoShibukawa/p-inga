@@ -1,0 +1,23 @@
+target:
+  module: "src/audit.ts"
+  export: "computeAuditGate"
+holdout: 2
+examples:
+  - name: "ex-1-gate-pass-30"
+    input: [{ sample_size: 30, useful_count: 24, threshold: 0.70 }]
+    output: true
+  - name: "ex-2-gate-fail-30"
+    input: [{ sample_size: 30, useful_count: 18, threshold: 0.70 }]
+    output: false
+  - name: "ex-3-gate-exact-threshold"
+    input: [{ sample_size: 10, useful_count: 7, threshold: 0.70 }]
+    output: true
+  - name: "ex-4-gate-zero-sample"
+    input: [{ sample_size: 0, useful_count: 0, threshold: 0.70 }]
+    output: false
+  - name: "ex-5-gate-custom-threshold"
+    input: [{ sample_size: 20, useful_count: 17, threshold: 0.80 }]
+    output: true
+  - name: "ex-6-gate-high-fail"
+    input: [{ sample_size: 20, useful_count: 15, threshold: 0.80 }]
+    output: false
