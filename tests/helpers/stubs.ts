@@ -153,11 +153,12 @@ export function writeStubs(
     const body = overrides?.[name] ?? DEFAULT_BODIES[name];
     const script = [
       `#!${process.execPath}`,
-      `const fs = require("node:fs");`,
       `const args = process.argv.slice(2);`,
-      `const logPath = process.env.STUB_LOG;`,
-      `if (logPath) {`,
-      `  fs.appendFileSync(logPath, JSON.stringify({ name: ${JSON.stringify(name)}, home: process.env.HOME || "", args }) + "\\n");`,
+      `{`,
+      `  const logPath = process.env.STUB_LOG;`,
+      `  if (logPath) {`,
+      `    require("node:fs").appendFileSync(logPath, JSON.stringify({ name: ${JSON.stringify(name)}, home: process.env.HOME || "", args }) + "\\n");`,
+      `  }`,
       `}`,
       body,
     ].join("\n");
