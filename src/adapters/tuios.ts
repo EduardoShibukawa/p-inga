@@ -26,14 +26,21 @@ export const tuiosProbe: Probe = {
     if (r.exit !== 0) {
       return { status: "broken", detail: `integration status exit ${r.exit}` };
     }
+    const coreHarnesses = ["claude-code", "opencode", "pi", "hermes"];
     const lines = r.stdout.split(/\r?\n/).filter((l) => l.trim() !== "");
-    if (lines.some((l) => l.includes("not installed"))) {
+    const coreLines = lines.filter((l) =>
+      coreHarnesses.some((h) => l.startsWith(h) || l.split(/\s+/)[0] === h),
+    );
+    if (coreLines.length === 0) {
+      return { status: "degraded", detail: "nenhuma integração encontrada" };
+    }
+    if (coreLines.some((l) => l.includes("not installed"))) {
       return {
         status: "degraded",
         detail: "integração não instalada em alguma parte",
       };
     }
-    if (lines.every((l) => l.includes("installed") || l.includes("current"))) {
+    if (coreLines.every((l) => l.includes("installed") || l.includes("current"))) {
       return { status: "ok", detail: "integrações instaladas" };
     }
     return {
