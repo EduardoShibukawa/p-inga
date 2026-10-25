@@ -16,7 +16,7 @@ holdout_rule: "sha256 partition >= 4 visible + 2 holdout"
 examples_cmd: "pinga examples tasks/T19/PLAN.md --from /tmp/pinga-examples/T19.yaml"
 ---
 ## Passos
-- [ ] RED: tests/audit.test.ts; prove-red exit 0; GREEN: audit/lessons/cli; eval
+- [x] RED: tests/audit.test.ts; prove-red exit 0; GREEN: audit/lessons/cli; eval
 ## Exemplos (gerados antes do código)
 1. in: calls=2, git=1 -> 0.5; 2. in: calls=0 -> 1.0; 3. in: 23/30 -> pass
 4. in: 15/30 -> fail; 5. in: 8/10 -> pass; 6. in: 0/0 -> fail
