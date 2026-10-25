@@ -16,7 +16,7 @@ holdout_rule: "sha256 partition >= 4 visible + 2 holdout"
 examples_cmd: "pinga examples tasks/T17/PLAN.md --from /tmp/pinga-examples/T17.yaml"
 ---
 ## Passos
-- [ ] RED: tests/user-correction.test.ts; prove-red exit 0; GREEN: detect/transcript/learn; eval
+- [x] RED: tests/user-correction.test.ts; prove-red exit 0; GREEN: detect/transcript/learn; eval
 ## Exemplos (gerados antes do código)
 1. in: "não, reverte isso" -> out: true; 2. in: "wrong file" -> out: true; 3. in: "stop" -> out: true
 4. in: "ótimo, continue" -> out: false; 5. in: "<TASK>long prompt..." -> out: false; 6. in: "" -> out: false
