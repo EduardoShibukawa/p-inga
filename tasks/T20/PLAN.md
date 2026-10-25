@@ -16,7 +16,7 @@ holdout_rule: "sha256 partition >= 4 visible + 2 holdout"
 examples_cmd: "pinga examples tasks/T20/PLAN.md --from /tmp/pinga-examples/T20.yaml"
 ---
 ## Passos
-- [ ] RED: tests/maestro.test.ts; prove-red exit 0; GREEN: maestro/cli; eval
+- [x] RED: tests/maestro.test.ts; prove-red exit 0; GREEN: maestro/cli; eval
 ## Exemplos (gerados antes do código)
 1. in: { bytes: 5000 } -> truncated <= 4096; 2. in: { ftpr: 0.8 } -> ranked
 3. in: { mode: "mvp" } -> motor; 4. in: { mode: "completo" } -> maestro
