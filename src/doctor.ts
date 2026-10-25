@@ -7,7 +7,7 @@ import { opencodeAdapter } from "./adapters/opencode";
 import { piAdapter } from "./adapters/pi";
 import { tuiosAdapter } from "./adapters/tuios";
 import { attestFromEndpoint } from "./family";
-import { ADAPTER_ORDER, type Adapter, type Probe } from "./install";
+import { ADAPTER_ORDER, type Adapter, type Probe, pickSource } from "./install";
 import {
   defaultManifestPath,
   sha256File,
@@ -113,11 +113,7 @@ export type DoctorOptions = {
 
 /** Fonte do pi-harness (mesma porta do install). */
 function sourceOf(env: Record<string, string | undefined>): string {
-  const value = env.PINGA_PI_HARNESS_DIR;
-  if (value === undefined || value === "") {
-    return resolve(ROOT, "../pi-harness");
-  }
-  return value;
+  return pickSource(env);
 }
 
 const ADAPTERS: Record<string, Adapter> = {

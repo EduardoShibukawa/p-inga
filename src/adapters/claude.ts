@@ -32,7 +32,7 @@ export const claudePluginListProbe: Probe = {
     }
     const lines = r.stdout.split(/\r?\n/);
     const start = lines.findIndex((l) =>
-      l.startsWith(CLAUDE_PLUGIN_KEY),
+      l.includes(CLAUDE_PLUGIN_KEY),
     );
     if (start === -1) {
       return {
