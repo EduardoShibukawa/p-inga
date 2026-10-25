@@ -16,7 +16,7 @@ holdout_rule: "sha256 partition >= 4 visible + 2 holdout"
 examples_cmd: "pinga examples tasks/T18/PLAN.md --from /tmp/pinga-examples/T18.yaml"
 ---
 ## Passos
-- [ ] RED: tests/adopt.test.ts; prove-red exit 0; GREEN: adopt/install/manifest/cli; eval
+- [x] RED: tests/adopt.test.ts; prove-red exit 0; GREEN: adopt/install/manifest/cli; eval
 ## Exemplos (gerados antes do código)
 1. in: claude-local -> adopted; 2. in: broken-sym -> cleaned; 3. in: missing -> skipped
 4. in: owned -> already_owned; 5. in: opencode -> adopted; 6. in: invalid -> error
