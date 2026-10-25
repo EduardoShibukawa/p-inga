@@ -12,13 +12,20 @@ export const DETECTORS = [
 
 export type Detector = (typeof DETECTORS)[number];
 
+export const ALL_DETECTORS = [...DETECTORS, "user_correction"] as const;
+
+export type ExtendedDetector = (typeof ALL_DETECTORS)[number];
+
+export const CORRECTION_MARKERS_PT_EN =
+  /\b(não|nao|errado|pare|reverte|desfaça|desfaca|volta|corrija|em vez disso|no|wrong|stop|revert|undo|don't|dont|instead|incorrect)\b/i;
+
 export type LessonClass = "bom" | "ruim" | "simplificar" | "melhorar";
 
 export const REWORK_MIN = 3;
 
 export type Candidate = {
   id: string; // "L-" + sha256(detector + "\n" + session_id).slice(0, 12)
-  detector: Detector;
+  detector: ExtendedDetector;
   class: LessonClass;
   session_id: string;
   harness: string;
@@ -75,7 +82,10 @@ function sha256hex(s: string): string {
 }
 
 /** Id estável: L- + primeiros 12 hex de sha256(detector + "\n" + session_id). */
-export function candidateId(detector: Detector, sessionId: string): string {
+export function candidateId(
+  detector: ExtendedDetector | Detector | string,
+  sessionId: string,
+): string {
   return `L-${sha256hex(`${detector}\n${sessionId}`).slice(0, 12)}`;
 }
 
@@ -130,8 +140,8 @@ export function validateCandidate(
 
   const detectorOk =
     typeof o.detector === "string" &&
-    (DETECTORS as readonly string[]).includes(o.detector);
-  if (!detectorOk) errors.push("detector deve ser um de DETECTORS");
+    (ALL_DETECTORS as readonly string[]).includes(o.detector);
+  if (!detectorOk) errors.push("detector deve ser um de ALL_DETECTORS");
 
   if (
     typeof o.class !== "string" ||
@@ -144,7 +154,7 @@ export function validateCandidate(
     errors.push("id deve casar com ^L-[0-9a-f]{12}$");
   } else if (detectorOk && nonEmpty("session_id")) {
     const expected = candidateId(
-      o.detector as Detector,
+      o.detector as ExtendedDetector,
       o.session_id as string,
     );
     if (o.id !== expected) {
@@ -157,7 +167,7 @@ export function validateCandidate(
 }
 
 /** Ação editorial fixa por detector (constante no código, <= 280 chars). */
-const ACTIONS: Record<Detector, string> = {
+const ACTIONS: Record<ExtendedDetector, string> = {
   rework:
     "Divida o passo em subpassos verificáveis e revise o contrato RED antes de editar em loop; muitos ciclos de retrabalho indicam objetivo mal formulado",
   missing_verification:
@@ -168,6 +178,8 @@ const ACTIONS: Record<Detector, string> = {
     "Valide contra casos novos além do holdout reproduzido: acerto repetido sem evidência nova indica memorização; revise a abordagem",
   guard_violation:
     "Respeite o touch e os tests_frozen do plano: ajuste o plano e registre a mudança de escopo antes de editar fora do combinado",
+  user_correction:
+    "Interrompa a abordagem ao receber correção do usuário: reverta a edição incorreta e releia o contrato antes de tentar novamente",
 };
 
 type DetectRow = {
@@ -330,8 +342,8 @@ export function detect(db: Database): {
 
   // Ordem canônica: índice do detector em DETECTORS, depois session_id.
   raw.sort((a, b) => {
-    const ia = DETECTORS.indexOf(a.detector);
-    const ib = DETECTORS.indexOf(b.detector);
+    const ia = DETECTORS.indexOf(a.detector as (typeof DETECTORS)[number]);
+    const ib = DETECTORS.indexOf(b.detector as (typeof DETECTORS)[number]);
     if (ia !== ib) return ia - ib;
     if (a.session_id !== b.session_id) {
       return a.session_id < b.session_id ? -1 : 1;
@@ -340,4 +352,147 @@ export function detect(db: Database): {
   });
 
   return { candidates: raw, discarded };
+}
+
+export function isHumanCorrectionPrompt(turn: {
+  text: string;
+  is_sidechain?: boolean | number;
+  is_subagent?: boolean | number;
+  preceding_tool_failed?: boolean;
+}): boolean {
+  if (!turn || typeof turn !== "object") return false;
+  if (
+    turn.is_sidechain === true ||
+    turn.is_sidechain === 1 ||
+    turn.is_subagent === true ||
+    (turn as Record<string, unknown>).is_subagent === 1
+  ) {
+    return false;
+  }
+  if (typeof turn.text !== "string") return false;
+  const trimmed = turn.text.trim();
+  if (trimmed.length === 0 || trimmed.length > 400) return false;
+  if (/^(\s*<TASK>|\s*<SYSTEM_MESSAGE>|\s*\[Message\])/i.test(trimmed)) {
+    return false;
+  }
+  if (turn.preceding_tool_failed !== true) return false;
+  return CORRECTION_MARKERS_PT_EN.test(trimmed);
+}
+
+export function detectUserCorrection(
+  db: Database,
+): Array<Candidate> {
+  const tables = new Set(
+    (
+      db.query("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{
+        name: string;
+      }>
+    ).map((r) => r.name),
+  );
+  if (!tables.has("user_turns")) return [];
+
+  const rows = db
+    .query(
+      `SELECT id, session_id, text FROM user_turns
+       WHERE is_human = 1 AND has_correction_marker = 1 AND preceding_tool_failed = 1
+       ORDER BY id ASC`,
+    )
+    .all() as Array<{ id: number; session_id: string; text: string }>;
+
+  if (rows.length === 0) return [];
+
+  const groups = new Map<string, { count: number; firstExcerpt: string }>();
+  for (const row of rows) {
+    const existing = groups.get(row.session_id);
+    if (!existing) {
+      groups.set(row.session_id, { count: 1, firstExcerpt: row.text });
+    } else {
+      existing.count++;
+    }
+  }
+
+  const out: Candidate[] = [];
+  const sessionIds = Array.from(groups.keys()).sort();
+
+  for (const sessionId of sessionIds) {
+    const group = groups.get(sessionId)!;
+    const excerpt = redactExcerpt(group.firstExcerpt);
+    if (excerpt === null) continue;
+
+    let harness = sessionId.includes(":") ? sessionId.split(":")[0]! : "unknown";
+    let repo: string | null = null;
+    let task: string | null = null;
+    let model: string | null = null;
+    let model_family: string | null = null;
+
+    if (tables.has("session")) {
+      const sess = db
+        .query(
+          "SELECT harness, repo, task, model, model_family FROM session WHERE id = ?",
+        )
+        .get(sessionId) as {
+        harness: string;
+        repo: string | null;
+        task: string | null;
+        model: string | null;
+        model_family: string | null;
+      } | null;
+      if (sess) {
+        if (sess.harness) harness = sess.harness;
+        repo = sess.repo;
+        task = sess.task;
+        model = sess.model;
+        model_family = sess.model_family;
+      }
+    }
+
+    const candidate: Candidate = {
+      id: candidateId("user_correction", sessionId),
+      detector: "user_correction",
+      class: "ruim",
+      session_id: sessionId,
+      harness,
+      repo,
+      task,
+      model,
+      model_family,
+      metric: "user_corrections",
+      value: group.count,
+      baseline: "0",
+      excerpt,
+      action: ACTIONS["user_correction"],
+      destination: destinationFor(repo),
+    };
+
+    const checked = validateCandidate(candidate);
+    if (checked.ok) {
+      out.push(checked.candidate);
+    }
+  }
+
+  return out;
+}
+
+export function detectAll(db: Database): {
+  candidates: Array<Candidate>;
+  discarded: number;
+} {
+  const base = detect(db);
+  const corr = detectUserCorrection(db);
+  const allCandidates = [...base.candidates, ...corr];
+
+  allCandidates.sort((a, b) => {
+    const ia = ALL_DETECTORS.indexOf(a.detector);
+    const ib = ALL_DETECTORS.indexOf(b.detector);
+    if (ia !== ib) return ia - ib;
+    if (a.session_id !== b.session_id) {
+      return a.session_id < b.session_id ? -1 : 1;
+    }
+    return 0;
+  });
+
+  return {
+    candidates: allCandidates,
+    discarded: base.discarded,
+  };
 }

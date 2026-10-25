@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { CORRECTION_MARKERS_PT_EN } from "./detect";
 import { parseEval } from "./eval";
 import { modelFamily } from "./family";
 import { openLedger } from "./ledger";
@@ -74,6 +75,15 @@ const CREATE_SESSION = `CREATE TABLE IF NOT EXISTS session (
   ingested_at TEXT NOT NULL
 )`;
 
+const CREATE_USER_TURNS = `CREATE TABLE IF NOT EXISTS user_turns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  is_human INTEGER NOT NULL,
+  has_correction_marker INTEGER NOT NULL,
+  preceding_tool_failed INTEGER NOT NULL
+)`;
+
 export function defaultLearnDbPath(
   env: Record<string, string | undefined> = process.env,
 ): string {
@@ -88,6 +98,7 @@ export function openLearnDb(path: string): Database {
   mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
   db.run(CREATE_SESSION);
+  db.run(CREATE_USER_TURNS);
   db.run(`PRAGMA user_version = ${LEARN_SCHEMA_VERSION}`);
   return db;
 }
@@ -770,4 +781,47 @@ export async function ingestMultiHarness(
   opts: MultiIngestOptions,
 ): Promise<MultiIngestResult> {
   return ingestMultiHarnessSync(opts);
+}
+
+export function ingestUserTurns(
+  db: Database,
+  sessionId: string,
+  turns: Array<{
+    text: string;
+    is_sidechain?: boolean | number;
+    is_subagent?: boolean | number;
+    preceding_tool_failed?: boolean;
+  }>,
+): number {
+  const insertStmt = db.query(
+    `INSERT INTO user_turns (session_id, text, is_human, has_correction_marker, preceding_tool_failed)
+     VALUES (?, ?, ?, ?, ?)`,
+  );
+  let count = 0;
+  for (const turn of turns) {
+    const raw = typeof turn.text === "string" ? turn.text : "";
+    const trimmed = raw.trim();
+    const redacted = redactExcerpt(raw) ?? "";
+    const is_human =
+      turn.is_sidechain !== true &&
+      turn.is_sidechain !== 1 &&
+      turn.is_subagent !== true &&
+      (turn as Record<string, unknown>).is_subagent !== 1 &&
+      !/^(\s*<TASK>|\s*<SYSTEM_MESSAGE>|\s*\[Message\])/i.test(trimmed) &&
+      trimmed.length > 0 &&
+      trimmed.length <= 400
+        ? 1
+        : 0;
+    const has_correction_marker = CORRECTION_MARKERS_PT_EN.test(trimmed) ? 1 : 0;
+    const preceding_tool_failed = turn.preceding_tool_failed === true ? 1 : 0;
+    insertStmt.run(
+      sessionId,
+      redacted,
+      is_human,
+      has_correction_marker,
+      preceding_tool_failed,
+    );
+    count++;
+  }
+  return count;
 }
