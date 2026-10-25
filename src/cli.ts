@@ -11,8 +11,9 @@ import { adoptLocalEntries } from "./adopt";
 import { provePlan } from "./prove";
 import { verifyPlan } from "./verify";
 import { doctorCmd } from "./doctor";
-import { defaultLearnDbPath, ingest, ingestMultiHarness, LEARN_EXIT } from "./learn";
+import { defaultLearnDbPath, ingest, ingestMultiHarness, LEARN_EXIT, openLearnDb } from "./learn";
 import { promoteCmd, proposeCmd } from "./lessons";
+import { auditNoVerify, evaluateLessonsPrecision } from "./audit";
 import { loadDenylist, redact } from "./redact";
 import { resolve } from "node:path";
 
@@ -28,6 +29,7 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga learn scan <arquivo...> [--allow PATH]... [--denylist PATH]
        pinga learn propose [--db PATH] [--out PATH] [--judge-model M] [--judge-endpoint URL]
        pinga learn promote <PROPOSED.md> --id <L-…> --to <LESSONS.md> [--by NOME]
+       pinga learn audit [--db PATH] [--repo PATH] [--sample N] [--threshold T] [--json]
        pinga precommit [-- <cmd...>]
        pinga install (--dry-run | --apply | --revert) [--only H] [--manifest PATH] [--home PATH]
        pinga adopt (--dry-run | --apply) [--home PATH] [--manifest PATH]
@@ -800,6 +802,103 @@ export async function runCli(argv: string[]): Promise<number> {
       }
 
       return promoteCmd({ proposals, id, to, by, env: process.env });
+    }
+
+    if (subcommand === "audit") {
+      let dbPath: string | undefined;
+      let repoPath: string | undefined;
+      let sampleSize: number | undefined;
+      let threshold: number | undefined;
+      let json = false;
+
+      const valueFlags = new Set([
+        "--db",
+        "--repo",
+        "--sample",
+        "--sample-size",
+        "--threshold",
+      ]);
+
+      for (let i = 0; i < rest.length; i++) {
+        const arg = rest[i];
+        if (arg === "--json") {
+          json = true;
+        } else if (valueFlags.has(arg)) {
+          const value = rest[i + 1];
+          if (
+            value === undefined ||
+            value === "" ||
+            value.startsWith("--")
+          ) {
+            console.error(USAGE);
+            return 2;
+          }
+          i++;
+          if (arg === "--db") dbPath = value;
+          else if (arg === "--repo") repoPath = value;
+          else if (arg === "--sample" || arg === "--sample-size") {
+            const parsed = parseInt(value, 10);
+            if (Number.isNaN(parsed) || parsed < 0) {
+              console.error(USAGE);
+              return 2;
+            }
+            sampleSize = parsed;
+          } else if (arg === "--threshold") {
+            const parsed = parseFloat(value);
+            if (Number.isNaN(parsed) || parsed < 0 || parsed > 1) {
+              console.error(USAGE);
+              return 2;
+            }
+            threshold = parsed;
+          }
+        } else {
+          console.error(USAGE);
+          return 2;
+        }
+      }
+
+      const resolvedDb = dbPath ?? defaultLearnDbPath(process.env);
+      if (!existsSync(resolvedDb)) {
+        console.error(`learn audit: banco não encontrado: ${resolvedDb}`);
+        return LEARN_EXIT.infra;
+      }
+
+      let db;
+      try {
+        db = openLearnDb(resolvedDb);
+      } catch (err) {
+        console.error(`learn audit: banco ilegível: ${(err as Error).message}`);
+        return LEARN_EXIT.infra;
+      }
+
+      try {
+        const noVerify = await auditNoVerify(db, repoPath);
+        const precision = evaluateLessonsPrecision(db, {
+          sampleSize,
+          threshold,
+        });
+
+        if (json) {
+          console.log(
+            JSON.stringify({
+              no_verify: noVerify,
+              precision,
+              no_verify_audit: noVerify,
+              lessons_precision: precision,
+            })
+          );
+        } else {
+          console.log(
+            `no-verify: flagged=${noVerify.tool_calls_flagged} bypassed=${noVerify.git_commits_bypassed} clean_ratio=${noVerify.clean_ratio}`
+          );
+          console.log(
+            `lessons precision: ${precision.useful_count}/${precision.sample_size} (${(precision.precision_ratio * 100).toFixed(1)}%) gate=${precision.passes_gate ? "PASS" : "FAIL"}`
+          );
+        }
+        return 0;
+      } finally {
+        db.close();
+      }
     }
 
     console.error(USAGE);
