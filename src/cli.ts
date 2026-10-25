@@ -1,6 +1,6 @@
 import { evalPlan } from "./eval";
 import { examplesPlan } from "./examples";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { judgePlan } from "./judge";
 import { modePlan } from "./mode";
 import { isProvisionalTest, precommitDecision } from "./guards";
@@ -22,6 +22,7 @@ import {
   formatMaestroDigest,
   recommendOrchestration,
 } from "./maestro";
+import { compactContext } from "./compact";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base]
@@ -44,7 +45,8 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga maestro scoreboard [--ledger PATH] [--db PATH] [--json]
        pinga maestro recommend <PLAN.md> [--ledger PATH] [--db PATH] [--json]
        pinga maestro envelope <PLAN.md> [--ledger PATH] [--json]
-       pinga maestro digest [--ledger PATH] [--db PATH] [--send] [--json]`;
+       pinga maestro digest [--ledger PATH] [--db PATH] [--send] [--json]
+       pinga compact <input.json> [--max-chars <n>] [--out <file>]`;
 
 /**
  * `pinga learn scan <arquivo...>`: aplica o scanner a cada arquivo e imprime
@@ -1100,6 +1102,91 @@ export async function runCli(argv: string[]): Promise<number> {
     return 2;
   }
 
+  if (command === "compact") {
+    let inputFile: string | undefined;
+    let maxChars: number | undefined;
+    let outFile: string | undefined;
+
+    const args = [subcommand, ...rest].filter((a) => a !== undefined);
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg === "--max-chars") {
+        const val = args[i + 1];
+        if (val === undefined || val === "" || val.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        const n = Number(val);
+        if (Number.isNaN(n) || n < 0) {
+          console.error(USAGE);
+          return 2;
+        }
+        maxChars = n;
+        i++;
+      } else if (arg === "--out") {
+        const val = args[i + 1];
+        if (val === undefined || val === "" || val.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        outFile = val;
+        i++;
+      } else if (arg.startsWith("--")) {
+        console.error(USAGE);
+        return 2;
+      } else if (inputFile === undefined) {
+        inputFile = arg;
+      } else {
+        console.error(USAGE);
+        return 2;
+      }
+    }
+
+    if (inputFile === undefined) {
+      console.error(USAGE);
+      return 2;
+    }
+
+    if (!existsSync(inputFile)) {
+      console.error(`compact: arquivo não encontrado: ${inputFile}`);
+      return 2;
+    }
+
+    let messages: any;
+    try {
+      const raw = readFileSync(inputFile, "utf8");
+      messages = JSON.parse(raw);
+    } catch (err) {
+      console.error(`compact: erro ao ler/parsear JSON: ${(err as Error).message}`);
+      return 2;
+    }
+
+    if (!Array.isArray(messages)) {
+      console.error("compact: entrada JSON deve ser um array de mensagens");
+      return 2;
+    }
+
+    const result = compactContext(messages, { maxChars });
+    const formatted = JSON.stringify(result.messages, null, 2);
+
+    if (outFile) {
+      try {
+        writeFileSync(outFile, formatted, "utf8");
+      } catch (err) {
+        console.error(`compact: erro ao escrever saída: ${(err as Error).message}`);
+        return 2;
+      }
+    } else {
+      console.log(formatted);
+    }
+
+    return 0;
+  }
+
   console.error(USAGE);
   return 2;
+}
+
+if (import.meta.main) {
+  process.exitCode = await runCli(process.argv.slice(2));
 }
