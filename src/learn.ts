@@ -6,8 +6,16 @@ import { parseEval } from "./eval";
 import { modelFamily } from "./family";
 import { openLedger } from "./ledger";
 import { receiptKind, type Receipt } from "./receipt";
-import { canary, canaryCheck, loadDenylist, redactExcerpt } from "./redact";
-import { parseClaudeTranscript, repoFromCwd } from "./transcript";
+import { canaryCheck, canary, loadDenylist, redactExcerpt } from "./redact";
+import {
+  isForbiddenPath,
+  parseClaudeTranscript,
+  parseFrictionMarkdown,
+  parseHermesDb,
+  parseOpencodeDb,
+  parsePiSession,
+  repoFromCwd,
+} from "./transcript";
 import { tokenFieldsFor } from "./tokens";
 
 export const LEARN_SCHEMA_VERSION = 1;
@@ -91,6 +99,11 @@ export type IngestOptions = {
   sessions?: string;
   repo?: string;
   denylist?: string;
+  // T16 — fontes multi-harness.
+  piDir?: string;
+  opencodeDb?: string;
+  hermesDb?: string;
+  frictionFile?: string;
   env?: Record<string, string | undefined>;
 };
 
@@ -132,14 +145,21 @@ export function ingest(opts: IngestOptions): IngestResult {
     return { exit, ingested, skipped, warnings };
   };
 
+  const multiSourceSet =
+    ((opts.piDir ?? "") !== "" ||
+      (opts.opencodeDb ?? "") !== "" ||
+      (opts.hermesDb ?? "") !== "" ||
+      (opts.frictionFile ?? "") !== "");
+
   if (
     (opts.ledger ?? "") === "" &&
     (opts.evals ?? "") === "" &&
-    (opts.sessions ?? "") === ""
+    (opts.sessions ?? "") === "" &&
+    !multiSourceSet
   ) {
     return fail(
       LEARN_EXIT.usage,
-      "learn ingest: nenhuma fonte informada (--ledger, --evals, --sessions)",
+      "learn ingest: nenhuma fonte informada (--ledger, --evals, --sessions, --pi, --opencode, --hermes, --friction)",
     );
   }
 
@@ -194,6 +214,42 @@ export function ingest(opts: IngestOptions): IngestResult {
       LEARN_EXIT.infra,
       `learn ingest: diretório de sessões não encontrado: ${opts.sessions}`,
     );
+  }
+  if (multiSourceSet) {
+    if (
+      opts.piDir !== undefined &&
+      opts.piDir !== "" &&
+      !existsSync(opts.piDir)
+    ) {
+      return fail(LEARN_EXIT.infra, `learn ingest: --pi não encontrado: ${opts.piDir}`);
+    }
+    if (
+      opts.opencodeDb !== undefined &&
+      opts.opencodeDb !== "" &&
+      !existsSync(opts.opencodeDb)
+    ) {
+      return fail(
+        LEARN_EXIT.infra,
+        `learn ingest: --opencode não encontrado: ${opts.opencodeDb}`,
+      );
+    }
+    if (
+      opts.hermesDb !== undefined &&
+      opts.hermesDb !== "" &&
+      !existsSync(opts.hermesDb)
+    ) {
+      return fail(LEARN_EXIT.infra, `learn ingest: --hermes não encontrado: ${opts.hermesDb}`);
+    }
+    if (
+      opts.frictionFile !== undefined &&
+      opts.frictionFile !== "" &&
+      !existsSync(opts.frictionFile)
+    ) {
+      return fail(
+        LEARN_EXIT.infra,
+        `learn ingest: --friction não encontrado: ${opts.frictionFile}`,
+      );
+    }
   }
 
   const dbPath =
@@ -415,10 +471,303 @@ export function ingest(opts: IngestOptions): IngestResult {
         });
       }
     }
+
+    // T16: fontes multi-harness (pi, opencode, hermes, fricção).
+    if (multiSourceSet) {
+      const counts: MultiCounts = { forbiddenPathsBlocked: 0, blockedPaths: [] };
+      const multiRows = collectMultiSources(
+        {
+          piDir: opts.piDir,
+          opencodeDb: opts.opencodeDb,
+          hermesDb: opts.hermesDb,
+          frictionFile: opts.frictionFile,
+        },
+        counts,
+        now,
+      );
+      for (const blocked of counts.blockedPaths) {
+        warnings.push(
+          `learn ingest: caminho proibido bloqueado (não lido): ${blocked}`,
+        );
+      }
+      for (const row of multiRows) store(row);
+    }
   } finally {
     db.close();
   }
 
   console.log(`ingested ${ingested} skipped ${skipped}`);
   return { exit: LEARN_EXIT.ok, ingested, skipped, warnings };
+}
+
+// ---------------------------------------------------------------------------
+// T16 — ingestão multi-harness (pi, opencode, hermes, fricção)
+// ---------------------------------------------------------------------------
+
+export type MultiIngestOptions = {
+  dbPath?: string;
+  piDir?: string;
+  opencodeDb?: string;
+  hermesDb?: string;
+  frictionFile?: string;
+  dryRun?: boolean;
+};
+
+export type MultiIngestResult = {
+  piSessionsIngested: number;
+  opencodeSessionsIngested: number;
+  hermesSessionsIngested: number;
+  frictionEntriesIngested: number;
+  forbiddenPathsBlocked: number;
+};
+
+type MultiCounts = {
+  forbiddenPathsBlocked: number;
+  blockedPaths: string[];
+};
+
+const NULL_MULTI_ROW: SessionRow = {
+  id: "",
+  kind: "transcript",
+  harness: "",
+  source_path: "",
+  source_sha256: "",
+  repo: null,
+  task: null,
+  started_at: null,
+  ended_at: null,
+  model: null,
+  model_family: null,
+  tokens_in: null,
+  tokens_out: null,
+  tokens_cache: null,
+  verification: "none",
+  verification_evidence: null,
+  receipt_kind: null,
+  status: null,
+  reason_code: null,
+  attempts: null,
+  rework_cycles: null,
+  commits: null,
+  excerpt: null,
+  ingested_at: "",
+};
+
+function walkEveryFile(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (curr: string): void => {
+    for (const entry of readdirSync(curr, { withFileTypes: true })) {
+      const p = join(curr, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else if (entry.isFile()) out.push(p);
+    }
+  };
+  walk(dir);
+  return out.sort();
+}
+
+function readSourceBytes(path: string): Buffer | null {
+  try {
+    return readFileSync(path);
+  } catch {
+    return null;
+  }
+}
+
+function hasValue(v: string | undefined): v is string {
+  return v !== undefined && v !== "";
+}
+
+/**
+ * Converte as fontes multi-harness em linhas da tabela `session`. Caminhos
+ * proibidos (isForbiddenPath) são contados e NUNCA abertos/lidos. Todo texto
+ * persistido passa por redactExcerpt antes de virar linha.
+ */
+function collectMultiSources(
+  opts: Pick<MultiIngestOptions, "piDir" | "opencodeDb" | "hermesDb" | "frictionFile">,
+  counts: MultiCounts,
+  now: string,
+): SessionRow[] {
+  const rows: SessionRow[] = [];
+  const block = (path: string): void => {
+    counts.forbiddenPathsBlocked++;
+    counts.blockedPaths.push(path);
+  };
+
+  if (hasValue(opts.piDir) && existsSync(opts.piDir)) {
+    for (const file of walkEveryFile(opts.piDir)) {
+      if (isForbiddenPath(file)) {
+        block(file); // nunca lido
+        continue;
+      }
+      if (!file.endsWith(".jsonl")) continue;
+      const bytes = readSourceBytes(file);
+      if (bytes === null) continue;
+      const s = parsePiSession(file);
+      rows.push({
+        ...NULL_MULTI_ROW,
+        id: `pi:${s.id}`,
+        harness: "pi",
+        source_path: resolve(file),
+        source_sha256: sha256hex(bytes),
+        repo: s.repo,
+        started_at: s.started_at,
+        ended_at: s.ended_at,
+        model: s.model,
+        model_family: s.model_family,
+        tokens_in: s.tokens_in,
+        tokens_out: s.tokens_out,
+        tokens_cache: s.tokens_cache,
+        verification: s.verification,
+        verification_evidence: redactExcerpt(s.verification_evidence),
+        ingested_at: now,
+      });
+    }
+  }
+
+  // Fontes SQLite: o sha é do arquivo inteiro (idempotência por source_sha256).
+  const dbSource = (
+    dbPath: string | undefined,
+    harness: "opencode" | "hermes",
+    parse: (p: string) => Array<{
+      id: string;
+      repo: string | null;
+      model: string | null;
+      tokens_in: number | null;
+      tokens_out: number | null;
+      tokens_cache: number | null;
+      verification: "pass" | "fail" | "none" | "not run";
+    }>,
+  ): void => {
+    if (!hasValue(dbPath)) return;
+    if (isForbiddenPath(dbPath)) {
+      block(dbPath); // nunca aberto
+      return;
+    }
+    if (!existsSync(dbPath)) return;
+    const bytes = readSourceBytes(dbPath);
+    if (bytes === null) return;
+    const sha = sha256hex(bytes);
+    for (const s of parse(dbPath)) {
+      rows.push({
+        ...NULL_MULTI_ROW,
+        id: `${harness}:${s.id}`,
+        harness,
+        source_path: resolve(dbPath),
+        source_sha256: sha,
+        repo: s.repo,
+        model: s.model,
+        model_family: s.model === null ? null : modelFamily(s.model),
+        tokens_in: s.tokens_in,
+        tokens_out: s.tokens_out,
+        tokens_cache: s.tokens_cache,
+        verification: s.verification,
+        ingested_at: now,
+      });
+    }
+  };
+  dbSource(opts.opencodeDb, "opencode", parseOpencodeDb);
+  dbSource(opts.hermesDb, "hermes", parseHermesDb);
+
+  if (hasValue(opts.frictionFile)) {
+    if (isForbiddenPath(opts.frictionFile)) {
+      block(opts.frictionFile); // nunca lido
+    } else if (existsSync(opts.frictionFile)) {
+      const bytes = readSourceBytes(opts.frictionFile);
+      if (bytes !== null) {
+        const sha = sha256hex(bytes);
+        for (const e of parseFrictionMarkdown(opts.frictionFile)) {
+          rows.push({
+            ...NULL_MULTI_ROW,
+            id: `friction:${e.id}`,
+            harness: "friction",
+            source_path: resolve(opts.frictionFile),
+            source_sha256: sha,
+            excerpt: redactExcerpt(
+              `Pattern: ${e.pattern} | Evidence: ${e.evidence} | Action: ${e.suggested_action}`,
+            ),
+            ingested_at: now,
+          });
+        }
+      }
+    }
+  }
+
+  return rows;
+}
+
+/**
+ * Item 8 (T16): idempotência por id + source_sha256 — mesma id com o mesmo sha
+ * é pulada; sha diferente substitui. Retorna quantas linhas foram inseridas,
+ * por harness.
+ */
+function persistMultiRows(db: Database, rows: readonly SessionRow[]): Record<string, number> {
+  const columns = [...SESSION_COLUMNS];
+  const insertStmt = db.query(
+    `INSERT INTO session (${columns.join(", ")}) VALUES (${columns
+      .map(() => "?")
+      .join(", ")})`,
+  );
+  const selectShaStmt = db.query(
+    "SELECT source_sha256 FROM session WHERE id = ?",
+  );
+  const deleteStmt = db.query("DELETE FROM session WHERE id = ?");
+
+  const byHarness: Record<string, number> = {};
+  for (const row of rows) {
+    const existing = selectShaStmt.get(row.id) as {
+      source_sha256: string;
+    } | null;
+    if (existing !== null && existing.source_sha256 === row.source_sha256) {
+      continue;
+    }
+    if (existing !== null) deleteStmt.run(row.id);
+    insertStmt.run(...columns.map((c) => row[c]));
+    byHarness[row.harness] = (byHarness[row.harness] ?? 0) + 1;
+  }
+  return byHarness;
+}
+
+/** Núcleo síncrono da ingestão multi-harness; `ingestMultiHarness` é o wrapper. */
+export function ingestMultiHarnessSync(opts: MultiIngestOptions): MultiIngestResult {
+  // Item 1/RED §1.1.2: canário de redação ANTES de qualquer inserção SQL.
+  const canaryResult = canaryCheck(canary());
+  if (!canaryResult.ok) {
+    throw new Error(
+      `canário de redação falhou: ${canaryResult.survivors} valor(es) sobreviveram`,
+    );
+  }
+
+  const counts: MultiCounts = { forbiddenPathsBlocked: 0, blockedPaths: [] };
+  const now =
+    process.env.PINGA_NOW !== undefined && process.env.PINGA_NOW !== ""
+      ? process.env.PINGA_NOW
+      : new Date().toISOString();
+  const rows = collectMultiSources(opts, counts, now);
+
+  let byHarness: Record<string, number> = {};
+  if (opts.dryRun !== true) {
+    const dbPath =
+      hasValue(opts.dbPath) ? opts.dbPath : defaultLearnDbPath(process.env);
+    const db = openLearnDb(resolve(dbPath));
+    try {
+      byHarness = persistMultiRows(db, rows);
+    } finally {
+      db.close();
+    }
+  }
+
+  return {
+    piSessionsIngested: byHarness["pi"] ?? 0,
+    opencodeSessionsIngested: byHarness["opencode"] ?? 0,
+    hermesSessionsIngested: byHarness["hermes"] ?? 0,
+    frictionEntriesIngested: byHarness["friction"] ?? 0,
+    forbiddenPathsBlocked: counts.forbiddenPathsBlocked,
+  };
+}
+
+export async function ingestMultiHarness(
+  opts: MultiIngestOptions,
+): Promise<MultiIngestResult> {
+  return ingestMultiHarnessSync(opts);
 }

@@ -10,7 +10,7 @@ import type { Harness } from "./manifest";
 import { provePlan } from "./prove";
 import { verifyPlan } from "./verify";
 import { doctorCmd } from "./doctor";
-import { defaultLearnDbPath, ingest, LEARN_EXIT } from "./learn";
+import { defaultLearnDbPath, ingest, ingestMultiHarness, LEARN_EXIT } from "./learn";
 import { promoteCmd, proposeCmd } from "./lessons";
 import { loadDenylist, redact } from "./redact";
 import { resolve } from "node:path";
@@ -23,6 +23,7 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga eval <PLAN.md> [--ledger PATH] [--check]
        pinga examples <PLAN.md> --from PATH
        pinga learn ingest [--ledger PATH] [--evals DIR] [--sessions DIR] [--db PATH] [--repo NOME] [--denylist PATH]
+                          [--pi DIR] [--opencode DB] [--hermes DB] [--friction FILE]
        pinga learn scan <arquivo...> [--allow PATH]... [--denylist PATH]
        pinga learn propose [--db PATH] [--out PATH] [--judge-model M] [--judge-endpoint URL]
        pinga learn promote <PROPOSED.md> --id <L-…> --to <LESSONS.md> [--by NOME]
@@ -131,6 +132,22 @@ function cleanGitEnv(): Record<string, string> {
     }
   }
   return env;
+}
+
+/**
+ * T16: fontes multi-harness via CLI — ingest com redação 3 camadas e
+ * blocklist de credenciais; contagens reportadas em JSON.
+ */
+async function learnIngestMulti(opts: {
+  dbPath: string;
+  piDir?: string;
+  opencodeDb?: string;
+  hermesDb?: string;
+  frictionFile?: string;
+}): Promise<number> {
+  const result = await ingestMultiHarness(opts);
+  console.log(JSON.stringify(result));
+  return LEARN_EXIT.ok;
 }
 
 export function runCli(argv: string[]): number | Promise<number> {
@@ -564,6 +581,10 @@ export function runCli(argv: string[]): number | Promise<number> {
       let db: string | undefined;
       let repo: string | undefined;
       let denylist: string | undefined;
+      let piDir: string | undefined;
+      let opencodeDb: string | undefined;
+      let hermesDb: string | undefined;
+      let frictionFile: string | undefined;
 
       const valueFlags = new Set([
         "--ledger",
@@ -572,6 +593,10 @@ export function runCli(argv: string[]): number | Promise<number> {
         "--db",
         "--repo",
         "--denylist",
+        "--pi",
+        "--opencode",
+        "--hermes",
+        "--friction",
       ]);
 
       for (let i = 0; i < rest.length; i++) {
@@ -588,6 +613,10 @@ export function runCli(argv: string[]): number | Promise<number> {
           else if (arg === "--sessions") sessions = value;
           else if (arg === "--db") db = value;
           else if (arg === "--repo") repo = value;
+          else if (arg === "--pi") piDir = value;
+          else if (arg === "--opencode") opencodeDb = value;
+          else if (arg === "--hermes") hermesDb = value;
+          else if (arg === "--friction") frictionFile = value;
           else denylist = value;
         } else {
           console.error(USAGE);
@@ -595,13 +624,30 @@ export function runCli(argv: string[]): number | Promise<number> {
         }
       }
 
+      const hasMulti =
+        piDir !== undefined ||
+        opencodeDb !== undefined ||
+        hermesDb !== undefined ||
+        frictionFile !== undefined;
+
       if (
         ledger === undefined &&
         evals === undefined &&
-        sessions === undefined
+        sessions === undefined &&
+        !hasMulti
       ) {
         console.error(USAGE);
         return 2;
+      }
+
+      if (hasMulti) {
+        return learnIngestMulti({
+          dbPath: db ?? defaultLearnDbPath(process.env),
+          piDir,
+          opencodeDb,
+          hermesDb,
+          frictionFile,
+        });
       }
 
       return ingest({
