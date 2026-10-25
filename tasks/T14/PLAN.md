@@ -7,11 +7,11 @@ tests_frozen: ["tests/learn.test.ts", "tests/redact.test.ts", "testdata/secrets/
 budget: { tokens: 400000, minutes: 120 }
 ---
 ## Passos
-- [ ] commit `test(T14): fixture fake-token` só com testdata/secrets/fake-token.txt (suíte ainda verde)
-- [ ] commit RED: tests/redact.test.ts + tests/learn.test.ts; prove-red exit 0; PARE para revisão
-- [ ] GREEN: redact.ts (regex, denylist, entropia, canário, clip); cli ganha `learn scan`
-- [ ] GREEN: transcript.ts (Claude JSONL); learn.ts (schema, ingest recibo/EVAL/transcript); `learn ingest`
-- [ ] commit GREEN com caminhos explícitos; mise run stable; verify, judge e eval de tasks/T14/PLAN.md
+- [x] commit `test(T14): fixture fake-token` só com testdata/secrets/fake-token.txt (suíte ainda verde)
+- [x] commit RED: tests/redact.test.ts + tests/learn.test.ts; prove-red exit 0; PARE para revisão
+- [x] GREEN: redact.ts (regex, denylist, entropia, canário, clip); cli ganha `learn scan`
+- [x] GREEN: transcript.ts (Claude JSONL); learn.ts (schema, ingest recibo/EVAL/transcript); `learn ingest`
+- [x] commit GREEN com caminhos explícitos; mise run stable; verify, judge e eval de tasks/T14/PLAN.md
 
 ## Dívidas conscientes
 - só transcripts do Claude Code; pi JSONL, opencode.db e Hermes state.db ficam para a v0.2
