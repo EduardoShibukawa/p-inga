@@ -1,6 +1,6 @@
 import { evalPlan } from "./eval";
 import { examplesPlan } from "./examples";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { judgePlan } from "./judge";
 import { modePlan } from "./mode";
 import { precommitDecision } from "./guards";
@@ -10,6 +10,9 @@ import type { Harness } from "./manifest";
 import { provePlan } from "./prove";
 import { verifyPlan } from "./verify";
 import { doctorCmd } from "./doctor";
+import { defaultLearnDbPath, ingest, LEARN_EXIT } from "./learn";
+import { loadDenylist, redact } from "./redact";
+import { resolve } from "node:path";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base]
@@ -18,9 +21,85 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga judge <PLAN.md> [--ledger PATH] [--judge-model M] [--endpoint URL] [--base SHA] [--usage-file PATH]
        pinga eval <PLAN.md> [--ledger PATH] [--check]
        pinga examples <PLAN.md> --from PATH
+       pinga learn ingest [--ledger PATH] [--evals DIR] [--sessions DIR] [--db PATH] [--repo NOME] [--denylist PATH]
+       pinga learn scan <arquivo...> [--allow PATH]... [--denylist PATH]
        pinga precommit [-- <cmd...>]
        pinga install (--dry-run | --apply | --revert) [--only H] [--manifest PATH] [--home PATH]
        pinga doctor [--json] [--only H] [--endpoint URL] [--home PATH] [--manifest PATH]`;
+
+/**
+ * `pinga learn scan <arquivo...>`: aplica o scanner a cada arquivo e imprime
+ * `<arquivo>:<linha>: <kind>` por achado — nunca o valor. Arquivos com byte
+ * NUL são pulados (binário); ilegível → exit 8; algum achado → exit 1.
+ */
+function learnScan(args: string[]): number {
+  const files: string[] = [];
+  const allow = new Set<string>();
+  let denylistPath: string | undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--allow") {
+      const value = args[i + 1];
+      if (value === undefined || value === "") {
+        console.error(USAGE);
+        return 2;
+      }
+      allow.add(value);
+      allow.add(resolve(value));
+      i++;
+    } else if (arg === "--denylist") {
+      const value = args[i + 1];
+      if (value === undefined || value === "") {
+        console.error(USAGE);
+        return 2;
+      }
+      denylistPath = value;
+      i++;
+    } else if (arg.startsWith("--")) {
+      console.error(USAGE);
+      return 2;
+    } else {
+      files.push(arg);
+    }
+  }
+
+  if (files.length === 0) {
+    console.error(USAGE);
+    return 2;
+  }
+
+  let denylist: ReadonlySet<string> | undefined;
+  if (denylistPath !== undefined) {
+    try {
+      denylist = loadDenylist(denylistPath);
+    } catch (err) {
+      console.error(`learn scan: denylist inválida: ${(err as Error).message}`);
+      return 2;
+    }
+  }
+
+  let found = 0;
+  for (const file of files) {
+    if (allow.has(file) || allow.has(resolve(file))) continue;
+    let bytes: Buffer;
+    try {
+      bytes = readFileSync(file);
+    } catch (err) {
+      console.error(
+        `learn scan: não foi possível ler ${file}: ${(err as Error).message}`,
+      );
+      return LEARN_EXIT.infra;
+    }
+    if (bytes.includes(0)) continue; // binário: pulado
+    for (const f of redact(bytes.toString("utf8"), { denylist }).findings) {
+      console.log(`${file}:${f.line}: ${f.kind}`);
+      found++;
+    }
+  }
+
+  return found > 0 ? 1 : LEARN_EXIT.ok;
+}
 
 /**
  * O git exporta variáveis de contexto de repositório para os processos de
@@ -472,6 +551,73 @@ export function runCli(argv: string[]): number | Promise<number> {
       manifestPath,
       env: process.env,
     });
+  }
+
+  if (command === "learn") {
+    if (subcommand === "ingest") {
+      let ledger: string | undefined;
+      let evals: string | undefined;
+      let sessions: string | undefined;
+      let db: string | undefined;
+      let repo: string | undefined;
+      let denylist: string | undefined;
+
+      const valueFlags = new Set([
+        "--ledger",
+        "--evals",
+        "--sessions",
+        "--db",
+        "--repo",
+        "--denylist",
+      ]);
+
+      for (let i = 0; i < rest.length; i++) {
+        const arg = rest[i];
+        if (valueFlags.has(arg)) {
+          const value = rest[i + 1];
+          if (value === undefined || value === "") {
+            console.error(USAGE);
+            return 2;
+          }
+          i++;
+          if (arg === "--ledger") ledger = value;
+          else if (arg === "--evals") evals = value;
+          else if (arg === "--sessions") sessions = value;
+          else if (arg === "--db") db = value;
+          else if (arg === "--repo") repo = value;
+          else denylist = value;
+        } else {
+          console.error(USAGE);
+          return 2;
+        }
+      }
+
+      if (
+        ledger === undefined &&
+        evals === undefined &&
+        sessions === undefined
+      ) {
+        console.error(USAGE);
+        return 2;
+      }
+
+      return ingest({
+        db: db ?? defaultLearnDbPath(process.env),
+        ledger,
+        evals,
+        sessions,
+        repo,
+        denylist,
+        env: process.env,
+      }).exit;
+    }
+
+    if (subcommand === "scan") {
+      return learnScan(rest);
+    }
+
+    console.error(USAGE);
+    return 2;
   }
 
   if (command === "precommit") {
