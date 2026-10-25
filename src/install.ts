@@ -121,10 +121,12 @@ export {
 
 function pickSource(env: Record<string, string | undefined>): string {
   const value = env.PINGA_PI_HARNESS_DIR;
-  if (value === undefined || value === "") {
-    return resolve(ROOT, "../pi-harness");
+  if (value !== undefined && value !== "") {
+    return value;
   }
-  return value;
+  const fromCwd = resolve(process.cwd(), "../pi-harness");
+  if (existsSync(fromCwd)) return fromCwd;
+  return resolve(ROOT, "../pi-harness");
 }
 
 function pickNow(env: Record<string, string | undefined>): string {
