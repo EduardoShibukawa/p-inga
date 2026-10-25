@@ -7,11 +7,11 @@ tests_frozen: ["tests/lessons.test.ts", "tests/learn.test.ts", "tests/redact.tes
 budget: { tokens: 400000, minutes: 120 }
 ---
 ## Passos
-- [ ] commit RED: tests/lessons.test.ts com os casos de RED.md; prove-red exit 0; PARE para revisão
-- [ ] GREEN: detect.ts (DETECTORS, regras SQL, agrupamento por task, validateCandidate, descarte)
-- [ ] GREEN: lessons.ts (render/parse, juiz com pré-checagem I10, escrita atômica, promote + trilha)
-- [ ] GREEN: cli ganha `learn propose` e `learn promote`
-- [ ] commit GREEN com caminhos explícitos; mise run stable; verify, judge e eval de tasks/T15/PLAN.md; AC-G
+- [x] commit RED: tests/lessons.test.ts com os casos de RED.md; prove-red exit 0; PARE para revisão
+- [x] GREEN: detect.ts (DETECTORS, regras SQL, agrupamento por task, validateCandidate, descarte)
+- [x] GREEN: lessons.ts (render/parse, juiz com pré-checagem I10, escrita atômica, promote + trilha)
+- [x] GREEN: cli ganha `learn propose` e `learn promote`
+- [x] commit GREEN com caminhos explícitos; mise run stable; verify, judge e eval de tasks/T15/PLAN.md; AC-G
 
 ## Dívidas conscientes
 - só 5 detectores; custo fora da curva, fricção, correção do usuário e drift ficam para a v0.2
