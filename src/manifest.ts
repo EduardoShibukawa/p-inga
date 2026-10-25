@@ -25,6 +25,7 @@ export type ManifestEntry = {
   sha256_post: string;
   installed_at: string;
   backup_path: string;
+  adopted?: boolean;
 };
 
 export type Manifest = { version: 1; entries: ManifestEntry[] };
@@ -47,6 +48,7 @@ const ENTRY_KEYS = new Set([
   "sha256_post",
   "installed_at",
   "backup_path",
+  "adopted",
 ]);
 
 export function defaultStateDir(
@@ -103,6 +105,9 @@ function validateEntry(x: unknown, i: number, errors: string[]): void {
     errors.push(`entries[${i}]: sha256_pre "absent" exige backup_path ""`);
   } else if (e.sha256_pre !== "absent" && e.backup_path === "") {
     errors.push(`entries[${i}]: backup_path não pode ser vazio`);
+  }
+  if (e.adopted !== undefined && typeof e.adopted !== "boolean") {
+    errors.push(`entries[${i}]: adopted deve ser boolean`);
   }
 }
 
