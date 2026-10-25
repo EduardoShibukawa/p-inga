@@ -178,7 +178,7 @@ describe("T13 — pinga doctor (I18) — tests/doctor.test.ts", () => {
       const lines23 = r23.stdout.trim().split("\n");
       expect(lines23.length).toBe(9);
       for (const line of lines23) {
-        expect(line).toMatch(/^(ok|degraded|broken|unverified) [a-z-]+/[a-z_]+: /);
+        expect(line).toMatch(/^(ok|degraded|broken|unverified) [a-z-]+\/[a-z_]+: /);
       }
 
       // 22. --only claude
