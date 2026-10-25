@@ -23,10 +23,38 @@ export function alwaysAllowed(task: string): string[] {
   return [`tasks/${task}/EXEC.md`, `tasks/${task}/EVAL.md`];
 }
 
+export function isProvisionalTest(path: string): boolean {
+  if (typeof path !== "string") return false;
+  const trimmed = path.trim();
+  if (trimmed === "") return false;
+
+  // Normaliza separadores e remove segmentos "."; rejeita escapes ("..").
+  const rawSegments = trimmed.replace(/\\/g, "/").split("/");
+  if (rawSegments.some((s) => s === "..")) return false;
+  const segments = rawSegments.filter((s) => s !== "" && s !== ".");
+  if (segments.length === 0) return false;
+  const normalized = segments.join("/");
+  if (normalized.startsWith("/") || normalized.includes("../")) return false;
+
+  const base = segments[segments.length - 1];
+
+  // Diretórios formais de scratchpad TDD.
+  if (normalized.startsWith("tests/provisional/")) return true;
+  if (normalized.startsWith("tests/scratch/")) return true;
+  if (normalized.startsWith(".pinga/scratch/")) return true;
+
+  // Prefixos/sufixos determinísticos no nome do arquivo.
+  if (base.startsWith("scratch_")) return true;
+  if (base.startsWith("test_scratch_")) return true;
+  if (base.includes(".scratch.")) return true;
+
+  return false;
+}
+
 export function evaluateGuards(input: GuardInput): GuardResult {
   if (input.tests_frozen !== undefined) {
     const files = input.changed
-      .filter((f) => input.tests_frozen!.includes(f))
+      .filter((f) => input.tests_frozen!.includes(f) && !isProvisionalTest(f))
       .sort();
     if (files.length > 0) {
       return {
@@ -40,7 +68,9 @@ export function evaluateGuards(input: GuardInput): GuardResult {
 
   if (input.touch !== undefined) {
     const allowed = new Set([...input.touch, ...alwaysAllowed(input.task)]);
-    const files = input.changed.filter((f) => !allowed.has(f)).sort();
+    const files = input.changed
+      .filter((f) => !allowed.has(f) && !isProvisionalTest(f))
+      .sort();
     if (files.length > 0) {
       return {
         ok: false,

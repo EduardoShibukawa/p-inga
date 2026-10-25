@@ -1,9 +1,9 @@
 import { evalPlan } from "./eval";
 import { examplesPlan } from "./examples";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { judgePlan } from "./judge";
 import { modePlan } from "./mode";
-import { precommitDecision } from "./guards";
+import { isProvisionalTest, precommitDecision } from "./guards";
 import { ADAPTER_ORDER, installCmd } from "./install";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { defaultManifestPath, type Harness } from "./manifest";
@@ -15,7 +15,7 @@ import { defaultLearnDbPath, ingest, ingestMultiHarness, LEARN_EXIT, openLearnDb
 import { promoteCmd, proposeCmd } from "./lessons";
 import { auditNoVerify, evaluateLessonsPrecision } from "./audit";
 import { loadDenylist, redact } from "./redact";
-import { resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import {
   computeWorkerScoreboard,
   createTaskRequest,
@@ -40,6 +40,7 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga install (--dry-run | --apply | --revert) [--only H] [--manifest PATH] [--home PATH]
        pinga adopt (--dry-run | --apply) [--home PATH] [--manifest PATH]
        pinga doctor [--json] [--only H] [--endpoint URL] [--home PATH] [--manifest PATH]
+       pinga tdd list
        pinga maestro scoreboard [--ledger PATH] [--db PATH] [--json]
        pinga maestro recommend <PLAN.md> [--ledger PATH] [--db PATH] [--json]
        pinga maestro envelope <PLAN.md> [--ledger PATH] [--json]
@@ -943,6 +944,47 @@ export async function runCli(argv: string[]): Promise<number> {
       env: cleanGitEnv(),
     });
     return res.exitCode ?? 1;
+  }
+
+  if (command === "tdd") {
+    const sub = subcommand ?? "list";
+    if (sub === "list") {
+      const root = process.cwd();
+      const results: string[] = [];
+      const skipDirs = new Set([
+        ".git",
+        "node_modules",
+        "dist",
+        "build",
+        "runs",
+        ".cache",
+      ]);
+      const walk = (dir: string) => {
+        let entries: ReturnType<typeof readdirSync>;
+        try {
+          entries = readdirSync(dir, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const entry of entries) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            if (skipDirs.has(entry.name)) continue;
+            walk(full);
+          } else if (entry.isFile()) {
+            const rel = relative(root, full).replace(/\\/g, "/");
+            if (isProvisionalTest(rel)) results.push(rel);
+          }
+        }
+      };
+      walk(root);
+      results.sort();
+      for (const r of results) console.log(r);
+      return 0;
+    }
+
+    console.error(USAGE);
+    return 2;
   }
 
   if (command === "maestro") {

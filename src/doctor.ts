@@ -451,6 +451,54 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorRecord[]> {
   return records.map(finalizeRecord);
 }
 
+export type GiraStatus = { ok: boolean; message: string };
+
+export function checkGiraStatus(
+  target?:
+    | string
+    | {
+        cwd?: string;
+        dir?: string;
+        path?: string;
+        repoRoot?: string;
+        root?: string;
+        env?: Record<string, string | undefined>;
+      },
+): GiraStatus {
+  let dir = process.cwd();
+  let env: Record<string, string | undefined> = process.env;
+  if (typeof target === "string") {
+    if (target.trim() !== "") dir = target;
+  } else if (target !== undefined && target !== null) {
+    dir =
+      target.cwd ??
+      target.dir ??
+      target.path ??
+      target.repoRoot ??
+      target.root ??
+      dir;
+    if (target.env !== undefined) env = target.env;
+  }
+
+  const pathEnv = env.PATH ?? process.env.PATH ?? "";
+  const giraBin = Bun.which("gira", { PATH: pathEnv });
+  const giraPresent = giraBin !== null;
+
+  const macroMapPath = join(dir, ".gira", "macro-map.json");
+  const macroMapPresent = existsSync(macroMapPath);
+
+  if (giraPresent && macroMapPresent) {
+    return { ok: true, message: "gira disponível e .gira/macro-map.json presente" };
+  }
+  if (!giraPresent && !macroMapPresent) {
+    return { ok: false, message: "gira ausente no PATH e .gira/macro-map.json ausente" };
+  }
+  if (!giraPresent) {
+    return { ok: false, message: "gira ausente no PATH" };
+  }
+  return { ok: false, message: `.gira/macro-map.json ausente em ${dir}` };
+}
+
 export async function doctorCmd(
   opts: DoctorOptions & { json: boolean },
 ): Promise<number> {
