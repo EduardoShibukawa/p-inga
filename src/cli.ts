@@ -11,6 +11,7 @@ import { provePlan } from "./prove";
 import { verifyPlan } from "./verify";
 import { doctorCmd } from "./doctor";
 import { defaultLearnDbPath, ingest, LEARN_EXIT } from "./learn";
+import { promoteCmd, proposeCmd } from "./lessons";
 import { loadDenylist, redact } from "./redact";
 import { resolve } from "node:path";
 
@@ -23,6 +24,8 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga examples <PLAN.md> --from PATH
        pinga learn ingest [--ledger PATH] [--evals DIR] [--sessions DIR] [--db PATH] [--repo NOME] [--denylist PATH]
        pinga learn scan <arquivo...> [--allow PATH]... [--denylist PATH]
+       pinga learn propose [--db PATH] [--out PATH] [--judge-model M] [--judge-endpoint URL]
+       pinga learn promote <PROPOSED.md> --id <L-…> --to <LESSONS.md> [--by NOME]
        pinga precommit [-- <cmd...>]
        pinga install (--dry-run | --apply | --revert) [--only H] [--manifest PATH] [--home PATH]
        pinga doctor [--json] [--only H] [--endpoint URL] [--home PATH] [--manifest PATH]`;
@@ -614,6 +617,92 @@ export function runCli(argv: string[]): number | Promise<number> {
 
     if (subcommand === "scan") {
       return learnScan(rest);
+    }
+
+    if (subcommand === "propose") {
+      let db: string | undefined;
+      let out: string | undefined;
+      let judgeModel: string | undefined;
+      let judgeEndpoint: string | undefined;
+
+      const valueFlags = new Set([
+        "--db",
+        "--out",
+        "--judge-model",
+        "--judge-endpoint",
+      ]);
+
+      for (let i = 0; i < rest.length; i++) {
+        const arg = rest[i];
+        if (valueFlags.has(arg)) {
+          const value = rest[i + 1];
+          if (
+            value === undefined ||
+            value === "" ||
+            value.startsWith("--")
+          ) {
+            console.error(USAGE);
+            return 2;
+          }
+          i++;
+          if (arg === "--db") db = value;
+          else if (arg === "--out") out = value;
+          else if (arg === "--judge-model") judgeModel = value;
+          else judgeEndpoint = value;
+        } else {
+          console.error(USAGE);
+          return 2;
+        }
+      }
+
+      return proposeCmd({
+        db,
+        out,
+        judgeModel,
+        judgeEndpoint,
+        env: process.env,
+      });
+    }
+
+    if (subcommand === "promote") {
+      let proposals: string | undefined;
+      let id: string | undefined;
+      let to: string | undefined;
+      let by: string | undefined;
+
+      for (let i = 0; i < rest.length; i++) {
+        const arg = rest[i];
+        if (arg === "--id" || arg === "--to" || arg === "--by") {
+          const value = rest[i + 1];
+          if (
+            value === undefined ||
+            value === "" ||
+            value.startsWith("--")
+          ) {
+            console.error(USAGE);
+            return 2;
+          }
+          i++;
+          if (arg === "--id") id = value;
+          else if (arg === "--to") to = value;
+          else by = value;
+        } else if (arg.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        } else if (proposals === undefined) {
+          proposals = arg;
+        } else {
+          console.error(USAGE);
+          return 2;
+        }
+      }
+
+      if (proposals === undefined || id === undefined || to === undefined) {
+        console.error(USAGE);
+        return 2;
+      }
+
+      return promoteCmd({ proposals, id, to, by, env: process.env });
     }
 
     console.error(USAGE);
