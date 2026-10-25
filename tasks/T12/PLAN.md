@@ -7,11 +7,11 @@ tests_frozen: ["tests/install.test.ts", "tests/helpers/home.ts", "tests/prove.te
 budget: { tokens: 400000, minutes: 120 }
 ---
 ## Passos
-- [ ] commit RED: tests/install.test.ts + tests/helpers/home.ts; prove-red exit 0; PARE para revisão
-- [ ] GREEN: shadow.ts (mkdtemp, cópia dos alvos, diff por JSON Pointer, limpeza garantida)
-- [ ] GREEN: manifest.ts (schema v1, escrita atômica, backups); install.ts (guarda A2, apply, revert)
-- [ ] GREEN: adapters/claude.ts (marketplace, installed_plugins v2, enabledPlugins); cli ganha `install`
-- [ ] commit GREEN com caminhos explícitos; mise run stable; verify, judge e eval de tasks/T12/PLAN.md
+- [x] commit RED: tests/install.test.ts + tests/helpers/home.ts; prove-red exit 0; PARE para revisão
+- [x] GREEN: shadow.ts (mkdtemp, cópia dos alvos, diff por JSON Pointer, limpeza garantida)
+- [x] GREEN: manifest.ts (schema v1, escrita atômica, backups); install.ts (guarda A2, apply, revert)
+- [x] GREEN: adapters/claude.ts (marketplace, installed_plugins v2, enabledPlugins); cli ganha `install`
+- [x] commit GREEN com caminhos explícitos; mise run stable; verify, judge e eval de tasks/T12/PLAN.md
 
 ## Dívidas conscientes
 - Claude escrito por escritor próprio restrito às 3 entradas do pinga, não por `claude plugin install` (D16)
