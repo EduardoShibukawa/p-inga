@@ -1,10 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -136,12 +139,25 @@ export function readManifest(path: string): Manifest {
   return validated.manifest;
 }
 
-export function writeAtomic(path: string, bytes: string | Uint8Array): void {
+/** Escrita atômica: arquivo regular (string/bytes) ou symlink (alvo renomeado por cima do arquivo). */
+export function writeAtomic(
+  path: string,
+  bytes: string | Uint8Array | { symlink: string },
+): void {
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true });
   const tmpPath = join(dir, `.tmp-${process.pid}-${randomUUID()}`);
+  const isSymlink =
+    bytes !== null &&
+    typeof bytes === "object" &&
+    !(bytes instanceof Uint8Array) &&
+    "symlink" in bytes;
   try {
-    writeFileSync(tmpPath, bytes);
+    if (isSymlink) {
+      symlinkSync((bytes as { symlink: string }).symlink, tmpPath);
+    } else {
+      writeFileSync(tmpPath, bytes as string | Uint8Array);
+    }
     renameSync(tmpPath, path);
   } catch (e) {
     rmSync(tmpPath, { force: true });
@@ -149,8 +165,22 @@ export function writeAtomic(path: string, bytes: string | Uint8Array): void {
   }
 }
 
+/**
+ * sha256File: symlink -> sha256("symlink:" + readlink) (o conteúdo real fora do
+ * HOME pode mudar; a identidade do alvo é o que o manifest controla).
+ */
 export function sha256File(path: string): string {
-  if (!existsSync(path)) return "absent";
+  let st;
+  try {
+    st = lstatSync(path);
+  } catch {
+    return "absent";
+  }
+  if (st.isSymbolicLink()) {
+    return createHash("sha256")
+      .update(`symlink:${readlinkSync(path)}`)
+      .digest("hex");
+  }
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
@@ -158,10 +188,17 @@ export function backupFile(
   stateDir: string,
   absPath: string,
 ): { sha256: string; backup_path: string } {
+  const st = lstatSync(absPath);
+  const isSymlink = st.isSymbolicLink();
   const sha256 = sha256File(absPath);
   const backup_path = join(stateDir, "backups", sha256);
   if (!existsSync(backup_path)) {
-    writeAtomic(backup_path, readFileSync(absPath));
+    // Symlink guarda o texto "symlink:<alvo>"; arquivo regular guarda os bytes
+    // (readlinkSync só pode rodar num symlink: EINVAL em arquivo regular).
+    writeAtomic(
+      backup_path,
+      isSymlink ? `symlink:${readlinkSync(absPath)}` : readFileSync(absPath),
+    );
   }
   return { sha256, backup_path };
 }

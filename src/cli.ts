@@ -4,10 +4,12 @@ import { existsSync } from "node:fs";
 import { judgePlan } from "./judge";
 import { modePlan } from "./mode";
 import { precommitDecision } from "./guards";
-import { installCmd } from "./install";
+import { ADAPTER_ORDER, installCmd } from "./install";
 import { defaultLedgerPath, openLedger } from "./ledger";
+import type { Harness } from "./manifest";
 import { provePlan } from "./prove";
 import { verifyPlan } from "./verify";
+import { doctorCmd } from "./doctor";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base]
@@ -17,7 +19,8 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga eval <PLAN.md> [--ledger PATH] [--check]
        pinga examples <PLAN.md> --from PATH
        pinga precommit [-- <cmd...>]
-       pinga install (--dry-run | --apply | --revert) [--manifest PATH] [--home PATH]`;
+       pinga install (--dry-run | --apply | --revert) [--only H] [--manifest PATH] [--home PATH]
+       pinga doctor [--json] [--only H] [--endpoint URL] [--home PATH] [--manifest PATH]`;
 
 /**
  * O git exporta variáveis de contexto de repositório para os processos de
@@ -355,6 +358,7 @@ export function runCli(argv: string[]): number | Promise<number> {
     const modes = new Set<string>();
     let home: string | undefined;
     let manifestPath: string | undefined;
+    let only: string | undefined;
 
     // O primeiro argumento cai em `subcommand`; o modo pode estar em
     // qualquer posição.
@@ -364,7 +368,7 @@ export function runCli(argv: string[]): number | Promise<number> {
       const arg = args[i];
       if (arg === "--dry-run" || arg === "--apply" || arg === "--revert") {
         modes.add(arg);
-      } else if (arg === "--home" || arg === "--manifest") {
+      } else if (arg === "--home" || arg === "--manifest" || arg === "--only") {
         const value = args[i + 1];
         if (value === undefined || value === "") {
           console.error(USAGE);
@@ -372,7 +376,8 @@ export function runCli(argv: string[]): number | Promise<number> {
         }
         i++;
         if (arg === "--home") home = value;
-        else manifestPath = value;
+        else if (arg === "--manifest") manifestPath = value;
+        else only = value;
       } else {
         console.error(USAGE);
         return 2;
@@ -397,6 +402,72 @@ export function runCli(argv: string[]): number | Promise<number> {
         : ("revert" as const);
     return installCmd({
       mode,
+      home: resolvedHome,
+      manifestPath,
+      only: only as Harness | undefined,
+      env: process.env,
+    });
+  }
+
+  if (command === "doctor") {
+    let json = false;
+    let only: string | undefined;
+    let endpoint: string | undefined;
+    let home: string | undefined;
+    let manifestPath: string | undefined;
+
+    const valueFlags = new Set([
+      "--only",
+      "--endpoint",
+      "--home",
+      "--manifest",
+    ]);
+
+    // O primeiro argumento cai em `subcommand`; flags podem estar em
+    // qualquer posição.
+    const args = [subcommand, ...rest].filter((a) => a !== undefined);
+
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg === "--json") {
+        json = true;
+      } else if (valueFlags.has(arg)) {
+        const value = args[i + 1];
+        if (value === undefined || value === "") {
+          console.error(USAGE);
+          return 2;
+        }
+        i++;
+        if (arg === "--only") only = value;
+        else if (arg === "--endpoint") endpoint = value;
+        else if (arg === "--home") home = value;
+        else manifestPath = value;
+      } else {
+        console.error(USAGE);
+        return 2;
+      }
+    }
+
+    if (
+      only !== undefined &&
+      !(ADAPTER_ORDER as readonly string[]).includes(only) &&
+      only !== "llm" &&
+      only !== "manifest"
+    ) {
+      console.error(USAGE);
+      return 2;
+    }
+
+    const resolvedHome = home ?? process.env.HOME;
+    if (resolvedHome === undefined || resolvedHome === "") {
+      console.error(USAGE);
+      return 2;
+    }
+
+    return doctorCmd({
+      json,
+      only,
+      endpoint,
       home: resolvedHome,
       manifestPath,
       env: process.env,

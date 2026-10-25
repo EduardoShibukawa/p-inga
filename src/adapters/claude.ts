@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { Adapter, AdapterContext } from "../install";
+import type { Adapter, AdapterContext, Probe } from "../install";
 
 export const CLAUDE_MARKETPLACE = "pi-harness-local";
 export const CLAUDE_PLUGIN_KEY = "pi-harness@pi-harness-local";
@@ -23,8 +23,47 @@ function configInvalid(message: string): Error {
   return err;
 }
 
+export const claudePluginListProbe: Probe = {
+  check: "plugin_list",
+  cmd: () => ["plugin", "list"],
+  classify: (r: { exit: number; stdout: string }) => {
+    if (r.exit !== 0) {
+      return { status: "broken", detail: `plugin list exit ${r.exit}` };
+    }
+    const lines = r.stdout.split(/\r?\n/);
+    const start = lines.findIndex((l) =>
+      l.startsWith(CLAUDE_PLUGIN_KEY),
+    );
+    if (start === -1) {
+      return {
+        status: "degraded",
+        detail: "plugin pi-harness ausente em plugin list",
+      };
+    }
+    let end = start + 1;
+    while (end < lines.length && lines[end]!.trim() !== "") end++;
+    const block = lines.slice(start, end).join("\n");
+    if (block.includes("disabled")) {
+      return { status: "degraded", detail: "plugin pi-harness desabilitado" };
+    }
+    return { status: "ok", detail: "plugin pi-harness habilitado" };
+  },
+};
+
+export const claudePluginValidateProbe: Probe = {
+  check: "plugin_validate",
+  cmd: (ctx: { source: string }) => ["plugin", "validate", ctx.source],
+  classify: (r: { exit: number; stdout: string }) => {
+    if (r.exit !== 0) {
+      return { status: "broken", detail: `plugin validate exit ${r.exit}` };
+    }
+    return { status: "ok", detail: "validação do plugin passou" };
+  },
+};
+
 export const claudeAdapter: Adapter = {
   harness: "claude",
+  bin: "claude",
 
   targets: [
     ".claude/plugins/known_marketplaces.json",
@@ -52,6 +91,8 @@ export const claudeAdapter: Adapter = {
     ],
     ".claude/settings.json": [],
   },
+
+  probes: [claudePluginListProbe, claudePluginValidateProbe],
 
   apply(shadowHome: string, ctx: AdapterContext): void {
     // 1. known_marketplaces.json (ausente -> criado em cima de {})

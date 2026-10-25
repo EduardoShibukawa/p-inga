@@ -4,6 +4,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readlinkSync,
   realpathSync,
   rmSync,
@@ -13,6 +14,76 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 export const SHADOW_PREFIX = "pinga-shadow-";
+
+/**
+ * Helpers de CLI nativo, num módulo folha (sem importar/adaptar os adapters),
+ * para evitar ciclo de importação: os adapters precisam deles em runtime e o
+ * install os re-exporta.
+ */
+
+/**
+ * Falha de CLI nativo (exit != 0, spawn ou timeout): erro de infra (exit 8),
+ * citando o nome do binário.
+ */
+export function nativeFailError(
+  bin: string,
+  args: string[],
+  exit: number | null,
+): Error {
+  const err = new Error(
+    `${bin} ${args.join(" ")} falhou (exit ${exit === null ? "timeout" : exit})`,
+  ) as Error & { code?: string };
+  err.code = "infra";
+  return err;
+}
+
+/**
+ * CLI nativo, só na sombra (D15): amplia o PATH do env (T13 rodar o binário do
+ * harness pela ordem ADAPTER_ORDER) e roda com HOME/XDG_* apontando para a
+ * sombra. exit null => timeout (PINGA_INSTALL_TIMEOUT_MS) ou spawn falhou.
+ */
+export function runNative(
+  bin: string,
+  args: string[],
+  shadow: string,
+  env: Record<string, string | undefined>,
+  timeoutMs: number,
+): { exit: number | null; stdout: string; stderr: string } {
+  const PATH = env.PATH ?? process.env.PATH ?? "";
+  const resolved = Bun.which(bin, { PATH }) ?? bin;
+  const childEnv: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === "string") childEnv[key] = value;
+  }
+  childEnv.HOME = shadow;
+  childEnv.XDG_CONFIG_HOME = join(shadow, ".config");
+  childEnv.XDG_DATA_HOME = join(shadow, ".local/share");
+  childEnv.XDG_STATE_HOME = join(shadow, ".local/state");
+  childEnv.PI_CODING_AGENT_DIR = join(shadow, ".pi/agent");
+  try {
+    const res = Bun.spawnSync([resolved, ...args], {
+      cwd: shadow,
+      timeout: timeoutMs,
+      env: childEnv,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    return {
+      exit: res.exitedDueToTimeout ? null : res.exitCode,
+      stdout: res.stdout.toString(),
+      stderr: res.stderr.toString(),
+    };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return { exit: null, stdout: "", stderr: message };
+  }
+}
+
+export function installTimeoutMs(
+  env: Record<string, string | undefined>,
+): number {
+  return Number(env.PINGA_INSTALL_TIMEOUT_MS ?? 60000);
+}
 
 export type Change = {
   op: "+" | "-" | "~";
@@ -210,12 +281,17 @@ export async function withShadow<T>(
     for (const rel of targets) {
       const src = join(realHome, rel);
       if (!existsSync(src)) continue;
-      const st = lstatSync(src);
       const dst = join(shadow, rel);
+      if (rel.endsWith("/")) {
+        // Alvo de diretório (T13): copia recursivamente arquivos e symlinks.
+        copyTree(src, dst);
+        continue;
+      }
+      const st = lstatSync(src);
       mkdirSync(dirname(dst), { recursive: true });
       if (st.isSymbolicLink()) {
         symlinkSync(readlinkSync(src), dst);
-      } else {
+      } else if (st.isFile()) {
         copyFileSync(src, dst);
       }
     }
@@ -225,13 +301,39 @@ export async function withShadow<T>(
   }
 }
 
+function copyTree(srcDir: string, dstDir: string): void {
+  const st = lstatSync(srcDir);
+  if (!st.isDirectory()) return;
+  mkdirSync(dstDir, { recursive: true });
+  for (const name of readdirSync(srcDir)) {
+    const src = join(srcDir, name);
+    const dst = join(dstDir, name);
+    const st2 = lstatSync(src);
+    if (st2.isSymbolicLink()) {
+      symlinkSync(readlinkSync(src), dst);
+    } else if (st2.isDirectory()) {
+      copyTree(src, dst);
+    } else if (st2.isFile()) {
+      copyFileSync(src, dst);
+    }
+  }
+}
+
+export type DiffSection = {
+  harness: string;
+  files: FileDiff[];
+  skippedReason?: string;
+};
+
 export function renderDiff(
-  sections: Array<{ harness: string; files: FileDiff[] }>,
+  sections: Array<{ harness: string; files: FileDiff[]; skippedReason?: string }>,
 ): string {
   let out = "";
   for (const section of sections) {
-    if (section.files.length === 0) continue;
-    out += `=== ${section.harness} ===\n`;
+    if (section.files.length === 0 && !section.skippedReason) continue;
+    out += section.skippedReason
+      ? `=== ${section.harness} (pulado: ${section.skippedReason}) ===\n`
+      : `=== ${section.harness} ===\n`;
     for (const file of section.files) {
       if (file.changes.length === 0) continue;
       const tag =
@@ -243,7 +345,10 @@ export function renderDiff(
       out += `--- ${file.file}${tag}\n`;
       for (const change of file.changes) {
         if (change.op === "+") {
-          out += `+ ${change.pointer}: ${JSON.stringify(change.after)}\n`;
+          out +=
+            change.after === undefined
+              ? `+ ${change.pointer}\n`
+              : `+ ${change.pointer}: ${JSON.stringify(change.after)}\n`;
         } else if (change.op === "-") {
           out += `- ${change.pointer}\n`;
         } else {
