@@ -7,11 +7,11 @@ tests_frozen: ["tests/adapters.test.ts", "tests/doctor.test.ts", "tests/helpers/
 budget: { tokens: 450000, minutes: 120 }
 ---
 ## Passos
-- [ ] commit RED: tests/adapters.test.ts, tests/doctor.test.ts, tests/helpers/stubs.ts; prove-red exit 0; PARE
-- [ ] GREEN: shadow/manifest: alvos de diretório, symlinks, YAML, prefixos só-acréscimo, diff por etapa
-- [ ] GREEN: adapters pi/hermes/tuios (CLI nativo na sombra), opencode (arquivo próprio); install --only
-- [ ] GREEN: doctor.ts (probes, finalizeRecord, law2, timeout, manifest, llm); cli ganha `doctor`
-- [ ] commit GREEN com caminhos explícitos; mise run stable; verify, judge e eval de tasks/T13/PLAN.md
+- [x] commit RED: tests/adapters.test.ts, tests/doctor.test.ts, tests/helpers/stubs.ts; prove-red exit 0; PARE
+- [x] GREEN: shadow/manifest: alvos de diretório, symlinks, YAML, prefixos só-acréscimo, diff por etapa
+- [x] GREEN: adapters pi/hermes/tuios (CLI nativo na sombra), opencode (arquivo próprio); install --only
+- [x] GREEN: doctor.ts (probes, finalizeRecord, law2, timeout, manifest, llm); cli ganha `doctor`
+- [x] commit GREEN com caminhos explícitos; mise run stable; verify, judge e eval de tasks/T13/PLAN.md
 
 ## Dívidas conscientes
 - formatos de Hermes enable e TUIOS hooks não verificados (§A.5): stubs fixam o contrato, doctor acusa
