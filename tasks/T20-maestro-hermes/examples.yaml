@@ -1,0 +1,23 @@
+target:
+  module: "src/maestro.ts"
+  export: "truncateEnvelopeString"
+holdout: 2
+examples:
+  - name: "ex-1-short-string"
+    input: ["hello world", 100]
+    output: "hello world"
+  - name: "ex-2-exact-limit"
+    input: ["exactlimit", 10]
+    output: "exactlimit"
+  - name: "ex-3-truncate-simple"
+    input: ["abcdefghij", 5]
+    output: "abcde"
+  - name: "ex-4-zero-limit"
+    input: ["test", 0]
+    output: ""
+  - name: "ex-5-truncate-multibyte"
+    input: ["áéíóú", 4]
+    output: "áé"
+  - name: "ex-6-large-truncate"
+    input: ["large string with lots of content", 12]
+    output: "large string"
