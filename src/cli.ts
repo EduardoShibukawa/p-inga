@@ -1,8 +1,10 @@
 import { evalPlan } from "./eval";
 import { examplesPlan } from "./examples";
+import { existsSync } from "node:fs";
 import { judgePlan } from "./judge";
 import { modePlan } from "./mode";
 import { precommitDecision } from "./guards";
+import { installCmd } from "./install";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { provePlan } from "./prove";
 import { verifyPlan } from "./verify";
@@ -14,7 +16,8 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga judge <PLAN.md> [--ledger PATH] [--judge-model M] [--endpoint URL] [--base SHA] [--usage-file PATH]
        pinga eval <PLAN.md> [--ledger PATH] [--check]
        pinga examples <PLAN.md> --from PATH
-       pinga precommit [-- <cmd...>]`;
+       pinga precommit [-- <cmd...>]
+       pinga install (--dry-run | --apply | --revert) [--manifest PATH] [--home PATH]`;
 
 /**
  * O git exporta variáveis de contexto de repositório para os processos de
@@ -346,6 +349,58 @@ export function runCli(argv: string[]): number | Promise<number> {
     }
 
     return examplesPlan(planPath, { from });
+  }
+
+  if (command === "install") {
+    const modes = new Set<string>();
+    let home: string | undefined;
+    let manifestPath: string | undefined;
+
+    // O primeiro argumento cai em `subcommand`; o modo pode estar em
+    // qualquer posição.
+    const args = [subcommand, ...rest].filter((a) => a !== undefined);
+
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg === "--dry-run" || arg === "--apply" || arg === "--revert") {
+        modes.add(arg);
+      } else if (arg === "--home" || arg === "--manifest") {
+        const value = args[i + 1];
+        if (value === undefined || value === "") {
+          console.error(USAGE);
+          return 2;
+        }
+        i++;
+        if (arg === "--home") home = value;
+        else manifestPath = value;
+      } else {
+        console.error(USAGE);
+        return 2;
+      }
+    }
+
+    if (modes.size !== 1) {
+      console.error(USAGE);
+      return 2;
+    }
+
+    const resolvedHome = home ?? process.env.HOME;
+    if (resolvedHome === undefined || !existsSync(resolvedHome)) {
+      console.error(USAGE);
+      return 2;
+    }
+
+    const mode = modes.has("--dry-run")
+      ? ("dry-run" as const)
+      : modes.has("--apply")
+        ? ("apply" as const)
+        : ("revert" as const);
+    return installCmd({
+      mode,
+      home: resolvedHome,
+      manifestPath,
+      env: process.env,
+    });
   }
 
   if (command === "precommit") {
