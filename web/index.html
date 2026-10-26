@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>P-Ingá SDLC Studio — Homelab Deterministic Governor</title>
+  <title>P-Ingá SDLC Studio — G-Inga Deterministic Governor</title>
 
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -242,6 +242,10 @@
           <i data-lucide="git-fork" class="w-4 h-4 text-purple-400"></i>
           <span>Grafo Semântico AST</span>
         </button>
+        <button onclick="switchTab('sessions')" id="tab-btn-sessions" class="flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">
+          <i data-lucide="terminal" class="w-4 h-4 text-amber-400"></i>
+          <span>Sessões & Agentes</span>
+        </button>
       </div>
 
       <!-- Real-time Filter & Search Input -->
@@ -387,6 +391,17 @@
             <span>Consultar AST (Gira)</span>
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: SESSÕES & AGENTES -->
+    <div id="tab-sessions" class="hidden space-y-4">
+      <div class="glass-card rounded-xl border border-slate-800 p-5 shadow-2xl">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-base font-bold text-amber-400 flex items-center gap-2"><i data-lucide="terminal" class="w-4 h-4"></i><span>Sessões & Agentes em Execução</span></h2>
+          <button onclick="loadSessions()" class="px-2.5 py-1 text-xs rounded bg-slate-800 text-slate-300 hover:text-white border border-slate-700 flex items-center gap-1"><i data-lucide="refresh-cw" class="w-3 h-3"></i> Atualizar</button>
+        </div>
+        <div id="sessions-list" class="space-y-2 font-mono text-xs"></div>
       </div>
     </div>
 
@@ -1407,8 +1422,18 @@
     // ---------------------------------------------
     // View Tab Switcher (Receipts, Scoreboard, Graph)
     // ---------------------------------------------
+    async function loadSessions() {
+      try {
+        const res = await fetch('/api/sessions');
+        const data = await res.json();
+        const list = document.getElementById('sessions-list');
+        const procs = data.processes || [];
+        list.innerHTML = procs.map(p => `<div class="flex items-center justify-between py-1 border-b border-slate-800/40"><span class="text-amber-300">${p.kind}</span><span class="text-slate-400 truncate max-w-md">${p.command}</span><span class="text-slate-500">pid ${p.pid} cpu ${p.cpu}% mem ${p.mem}%</span></div>`).join('') || '<div class="text-slate-500">Nenhuma sessão ativa.</div>';
+      } catch (e) { console.error(e); }
+    }
+
     function switchTab(tab) {
-      ['receipts', 'scoreboard', 'graph'].forEach(t => {
+      ['receipts', 'scoreboard', 'graph', 'sessions'].forEach(t => {
         const btn = document.getElementById(`tab-btn-${t}`);
         const view = document.getElementById(`tab-${t}`);
         if (t === tab) {

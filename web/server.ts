@@ -63,7 +63,31 @@ if (existsSync(LEDGER_PATH)) {
   }, 1500);
 }
 
-// Heartbeat SSE keep-alive
+// SSE session process polling
+let lastSessionPids = new Set<string>();
+setInterval(() => {
+  try {
+    const proc = Bun.spawnSync(["ps", "aux"]);
+    const out = new TextDecoder().decode(proc.stdout);
+    const lines = out.split("\n").slice(1);
+    const targets = ["tmux", "claude", "opencode", "hermes", "llama-server", "bun", "agy"];
+    const current = new Set<string>();
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 11) continue;
+      const cmd = parts.slice(10).join(" ");
+      if (targets.some((t) => cmd.toLowerCase().includes(t))) current.add(parts[1]);
+    }
+    // detect changes
+    const appeared = [...current].filter((p) => !lastSessionPids.has(p));
+    const disappeared = [...lastSessionPids].filter((p) => !current.has(p));
+    if (appeared.length || disappeared.length) {
+      notifySse("session", { appeared, disappeared, total: current.size, timestamp: new Date().toISOString() });
+    }
+    lastSessionPids = current;
+  } catch {}
+}, 5000);
 setInterval(() => {
   notifySse("ping", { time: Date.now() });
 }, 15000);
@@ -93,7 +117,7 @@ export const server = Bun.serve({
           const welcome = `event: log\ndata: ${JSON.stringify({
             source: "system",
             level: "info",
-            text: "🔌 Conectado ao stream SSE do P-Ingá SDLC Governor",
+            text: "🔌 Conectado ao stream SSE do P-Ingá SDLC Governor (G-Inga)",
             timestamp: new Date().toISOString(),
           })}\n\n`;
           controller.enqueue(new TextEncoder().encode(welcome));
@@ -726,6 +750,51 @@ export const server = Bun.serve({
       }
     }
 
+    // 11b. API: Sessões/Agentes ativos (processos)
+    if (url.pathname === "/api/sessions" || url.pathname === "/api/agents") {
+      try {
+        const proc = Bun.spawnSync(["ps", "aux"]);
+        const out = new TextDecoder().decode(proc.stdout);
+        const lines = out.split("\n").slice(1);
+        const targets = ["tmux", "claude", "opencode", "hermes", "llama-server", "bun", "agy"];
+        const procs = [];
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const parts = line.trim().split(/\s+/);
+          if (parts.length < 11) continue;
+          const cmd = parts.slice(10).join(" ");
+          if (targets.some((t) => cmd.toLowerCase().includes(t))) {
+            procs.push({
+              pid: parts[1],
+              cpu: parts[2],
+              mem: parts[3],
+              command: cmd,
+              kind: targets.find((t) => cmd.toLowerCase().includes(t)) || "other",
+            });
+          }
+        }
+        return Response.json({ total: procs.length, processes: procs }, {
+          headers: { "Access-Control-Allow-Origin": "*" },
+        });
+      } catch (e: any) {
+        return Response.json({ total: 0, processes: [], error: e.message }, { status: 500 });
+      }
+    }
+
+    // 11c. AÇÃO: controle de sessão (kill/attach stub)
+    if (url.pathname === "/api/action/session" && req.method === "POST") {
+      try {
+        const body = await req.json();
+        const action = body.action || "kill";
+        const pid = body.pid;
+        return Response.json({ success: true, stub: true, action, pid, message: "stub" }, {
+          headers: { "Access-Control-Allow-Origin": "*" },
+        });
+      } catch (e: any) {
+        return Response.json({ success: false, error: e.message }, { status: 500 });
+      }
+    }
+
     // 12. Interface Visual Reativa SPA (Serve index.html)
     if (url.pathname === "/" || url.pathname === "/index.html") {
       if (existsSync(HTML_FILE)) {
@@ -741,4 +810,4 @@ export const server = Bun.serve({
   },
 });
 
-console.log(`[P-INGA DASHBOARD] Ativo em http://localhost:${PORT}`);
+console.log(`[P-INGA DASHBOARD] G-Inga ativo em http://localhost:${PORT}`);
