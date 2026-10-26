@@ -171,6 +171,9 @@ export function runStaticChecks(content: string, repoRoot: string): DocsEvalResu
   if (/gira\s+arch\s+/.test(plainText)) {
     result.unknownFlags.push("gira arch (non-existent command)");
   }
+  if (/gira\s+gate\s+.*--strict/.test(plainText)) {
+    result.unknownFlags.push("gira gate --strict (flag --strict belongs to gate-lint)");
+  }
 
   return result;
 }
