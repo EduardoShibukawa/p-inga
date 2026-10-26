@@ -23,6 +23,7 @@ import {
   recommendOrchestration,
 } from "./maestro";
 import { compactContext } from "./compact";
+import { evaluateDocument, renderScorecardMarkdown } from "./docs_eval";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base]
@@ -46,7 +47,8 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga maestro recommend <PLAN.md> [--ledger PATH] [--db PATH] [--json]
        pinga maestro envelope <PLAN.md> [--ledger PATH] [--json]
        pinga maestro digest [--ledger PATH] [--db PATH] [--send] [--json]
-       pinga compact <input.json> [--max-chars <n>] [--out <file>]`;
+       pinga compact <input.json> [--max-chars <n>] [--out <file>]
+       pinga docs eval <target> [--ledger PATH] [--repo PATH] [--strict] [--json] [--seal]`;
 
 /**
  * `pinga learn scan <arquivo...>`: aplica o scanner a cada arquivo e imprime
@@ -1180,6 +1182,64 @@ export async function runCli(argv: string[]): Promise<number> {
       console.log(formatted);
     }
 
+    return 0;
+  }
+
+  if (command === "docs" && subcommand === "eval") {
+    let targetFile: string | undefined;
+    let ledgerPath: string | undefined;
+    let repoPath: string | undefined;
+    let strict = false;
+    let jsonOutput = false;
+    let seal = false;
+
+    for (let i = 0; i < rest.length; i++) {
+      const arg = rest[i];
+      if (arg === "--ledger") {
+        ledgerPath = rest[++i];
+      } else if (arg === "--repo") {
+        repoPath = rest[++i];
+      } else if (arg === "--strict") {
+        strict = true;
+      } else if (arg === "--json") {
+        jsonOutput = true;
+      } else if (arg === "--seal") {
+        seal = true;
+      } else if (targetFile === undefined && !arg.startsWith("-")) {
+        targetFile = arg;
+      } else {
+        console.error(USAGE);
+        return 2;
+      }
+    }
+
+    if (!targetFile) {
+      console.error(USAGE);
+      return 2;
+    }
+
+    if (!existsSync(targetFile)) {
+      console.error(`docs eval: arquivo não encontrado: ${targetFile}`);
+      return 2;
+    }
+
+    const content = readFileSync(targetFile, "utf8");
+    const evalRes = await evaluateDocument(content, targetFile, {
+      ledgerPath,
+      repoRoot: repoPath,
+      strict,
+      seal,
+    });
+
+    if (jsonOutput) {
+      console.log(JSON.stringify(evalRes, null, 2));
+    } else {
+      console.log(renderScorecardMarkdown(evalRes));
+    }
+
+    if (strict && evalRes.status === "fail") {
+      return 1;
+    }
     return 0;
   }
 
