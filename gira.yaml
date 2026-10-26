@@ -6,5 +6,5 @@ repositories:
   - id: p-inga
     url: "file://."
     ref: "main"
-    sha: "8e248c0189883d0856177a5d82eda999f137c920"
+    sha: "79acaf1132400798f6376dcce6d6207bfe6cb9cd"
     path_scope: "."

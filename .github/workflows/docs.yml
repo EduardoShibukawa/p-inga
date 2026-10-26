@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up mise toolchain
         uses: jdx/mise-action@v5
@@ -37,7 +39,7 @@ jobs:
       - name: Build living architecture and complete documentation portal
         run: |
           mkdir -p build
-          gira init . --allow-symbol-loss
+          gira init . --force --allow-symbol-loss
           gira docs --output build
 
       - name: Upload Pages artifact
