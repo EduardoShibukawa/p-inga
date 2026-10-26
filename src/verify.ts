@@ -9,6 +9,7 @@ import {
   shouldTrip,
 } from "./breaker";
 import { defaultLedgerPath, openLedger } from "./ledger";
+import { notifyReceipt } from "./discord";
 import { OVERFIT_EXIT, holdoutRunnerPath, runHoldout } from "./examples";
 import { changedFiles, evaluateGuards, findRedBase } from "./guards";
 import { currentBranch, parseOverride, resolveMode } from "./mode";
@@ -432,6 +433,9 @@ export function verifyPlan(
     };
 
     ledger.append(receipt);
+    if (process.env.PINGA_DISCORD_NOTIFY === "1") {
+      notifyReceipt(receipt).catch(() => {});
+    }
     console.log(JSON.stringify(receipt));
     return cliExit;
   } finally {

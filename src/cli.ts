@@ -24,6 +24,7 @@ import {
 } from "./maestro";
 import { compactContext } from "./compact";
 import { evaluateDocument, renderScorecardMarkdown } from "./docs_eval";
+import { notifyDigest, sendDiscordMessage } from "./discord";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base]
@@ -1092,10 +1093,16 @@ export async function runCli(argv: string[]): Promise<number> {
       }
       const scoreboard = await computeWorkerScoreboard(ledgerPath, dbPath);
       const digest = formatMaestroDigest(scoreboard, []);
+      if (send) {
+        await notifyDigest(digest);
+      }
       if (json) {
-        console.log(JSON.stringify({ scoreboard, digest }, null, 2));
+        console.log(JSON.stringify({ scoreboard, digest, sent: send }, null, 2));
       } else {
         console.log(digest);
+        if (send) {
+          console.log("\n[discord] digest enviado com sucesso");
+        }
       }
       return 0;
     }
@@ -1240,6 +1247,21 @@ export async function runCli(argv: string[]): Promise<number> {
     if (strict && evalRes.status === "fail") {
       return 1;
     }
+    return 0;
+  }
+
+  if (command === "notify") {
+    const message = [subcommand, ...rest].filter(Boolean).join(" ");
+    if (!message) {
+      console.error(USAGE);
+      return 2;
+    }
+    const res = await sendDiscordMessage(message);
+    if (!res.ok) {
+      console.error(`notify: erro ao enviar para o Discord: ${res.error}`);
+      return 1;
+    }
+    console.log("ok");
     return 0;
   }
 
