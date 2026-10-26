@@ -37,3 +37,53 @@ export function shouldTrip(prev: Receipt | null, signature: string): boolean {
   if (prev.status !== "fail" && prev.status !== "blocked") return false;
   return prev.breaker?.failure_signature === signature;
 }
+
+export const INERTIA_READ_THRESHOLD = 3;
+
+export type InertiaActionType = "read" | "write" | "test";
+
+export type InertiaAction = {
+  type: InertiaActionType;
+  target?: string;
+};
+
+export type InertiaResult = {
+  tripped: boolean;
+  consecutiveReads: number;
+  warning?: string;
+};
+
+/**
+ * Invariante I6: Disjuntor de Inércia (Read-Loop Breaker).
+ * Monitora o histórico recente de ações do agente.
+ * Se o agente encadear N leituras consecutivas sem mutação ou execução de teste,
+ * o disjuntor de inércia dispara uma intervenção reflexiva.
+ */
+export function evaluateInertia(
+  history: InertiaAction[],
+  threshold = INERTIA_READ_THRESHOLD
+): InertiaResult {
+  let consecutiveReads = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const act = history[i]!;
+    if (act.type === "read") {
+      consecutiveReads++;
+    } else {
+      break;
+    }
+  }
+
+  if (consecutiveReads >= threshold) {
+    return {
+      tripped: true,
+      consecutiveReads,
+      warning: `DISJUNTOR P-INGÁ (Invariante I6): ${consecutiveReads} leituras consecutivas sem intervenção. O código não avança apenas com observação. Formule uma hipótese de teste ou execute uma alteração pontual agora.`,
+    };
+  }
+
+  return {
+    tripped: false,
+    consecutiveReads,
+  };
+}
+
