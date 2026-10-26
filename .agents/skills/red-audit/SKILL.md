@@ -1,6 +1,6 @@
 ---
 name: red-audit
-description: Adversarial red-team audit, contract gap diagnosis, and autonomous surgical repair loop using P-Ingá invariants and Gira-G AST manipulation. Use to find loopholes, silent failures, invariant breaches, and verify fixes.
+description: Adversarial red-team audit, contract gap diagnosis, and autonomous surgical repair loop using P-Ingá invariants and Gira-G AST manipulation. Use to find loopholes, silent failures, invariant breaches, and verify fixes across Claude, Codex, Pi, OpenCode, Hermes, and Antigravity.
 ---
 
 # /red-audit — Adversarial Audit & Closed-Loop Repair
@@ -20,56 +20,53 @@ flowchart TD
 
 ---
 
-## 5 Invariants do Ciclo Red-Audit
+## 5 Invariants of the Red-Audit Cycle
 
-1. **Julgamento por Família Distinta (Invariante I13 / Lei 3):**
-   O modelo que audita/julga o código nunca deve ser da mesma família do modelo que implementou a solução. Se o executor for DeepSeek/Qwen, o auditor deve ser Gemini/Claude, e vice-versa.
-2. **Imunidade de Testes Oficiais (Invariante I5):**
-   Testes oficiais em `tests/` são imutáveis e congelados durante a resolução de gaps. Apenas testes provisórios (`tests/scratch_*.ts` ou `.scratch.*`) podem ser criados para TDD preliminar.
-3. **Mutações Cirúrgicas AST (Gira-G):**
-   Nunca reescrever arquivos inteiros (`write_file` > 100 linhas). As mutações devem ser direcionadas a símbolos específicos via `gira write <file> <symbol> --body '...'` ou `gira add`.
-4. **Preservação de Estabilidade de Prefixos (KV Cache):**
-   Observações de ferramentas devem ser limitadas no momento da ingestão. Mensagens anteriores no histórico são imutáveis para garantir 90%+ de prompt cache hit.
-5. **Recibos Criptográficos no Ledger (Invariante I2):**
-   Toda rodada de auditoria concluída deve anexar um recibo canônico SHA256 no banco imutável (`ledger.db`), garantindo histórico auditável contra regressões.
+1. **Distinct Family Judging (Invariant I13 / Lei 3):**
+   The model that audits/judges code must never belong to the same family as the authoring model. If executor is DeepSeek/Qwen, auditor must be Gemini/Claude, and vice-versa.
+2. **Official Test Suite Immunity (Invariant I5):**
+   Official tests in `tests/` are frozen during gap diagnosis. Only provisional scratch tests (`tests/scratch_*.ts`) may be authored during preliminary TDD.
+3. **Surgical AST Mutations (Gira-G):**
+   Never rewrite entire files (> 100 lines). Targeted modifications must use `gira write <file> <symbol> --body '...'` or localized edits.
+4. **Prefix Cache Stability (KV Cache / Lei 1):**
+   Tool outputs must be capped at ingestion time. Prior conversation history is immutable to preserve 90%+ prompt cache hit rates.
+5. **Cryptographic Ledger Receipts (Invariant I2 / Lei 2):**
+   Every completed audit round must append a canonical SHA256 receipt to `ledger.db` via `pinga verify` or `pinga ledger verify`.
 
 ---
 
-## Procedimento de Execução
+## Execution Guide
 
-### Fase 1: Auditoria Adversarial (Reviewer Judge)
-Lance um subagente auditor adversarial configurado para encontrar:
-- **Type Unsoundness:** Transpilações cegas que omitem checagem estrita (`tsc --noEmit`).
-- **Lexer/Parser Edge Cases:** Contagem de chaves em comentários (`// {`), strings, regexes ou template literals.
-- **KV Cache Thrashing:** Mutações retroativas no histórico que invalidam prefill.
-- **Fail-open Loopholes:** Caminhos com `./` ou barras invertidas burlam listas de arquivos congelados.
+### Phase 1: Adversarial Audit (Reviewer Judge)
+Inspect codebase for:
+- **Type Unsoundness:** Unchecked transpilation or missing strict checks (`tsc --noEmit`).
+- **Lexer/Parser Edge Cases:** Token boundaries, brace counts in strings/comments, edge regexes.
+- **Fail-open Loopholes:** Relative paths `./` or path traversal bypassing frozen file sets.
+- **KV Cache Invalidation:** Retroactive edits corrupting prefill cache.
 
-### Fase 2: Diagnóstico e Isolamento RED
-- Para cada GAP confirmado, crie um caso de teste reproduzível na suíte provisória:
-  ```bash
-  bun test tests/hooks.test.ts
-  go test -v ./internal/manipulator -run TestBraceCountingInComments
-  ```
+### Phase 2: Diagnostic Isolation & RED Proofing
+For each confirmed gap, isolate a reproducible test:
+```bash
+bun test tests/hooks.test.ts
+```
 
-### Fase 3: Mutação Cirúrgica com Gira-G
-- Localize o símbolo exato:
-  ```bash
-  gira outline <file>
-  gira read <file> <symbol>
-  ```
-- Aplique o conserto cirúrgico sem reescrever o arquivo:
-  ```bash
-  gira write <file> <symbol> --body '<nova implementação segura>'
-  ```
+### Phase 3: Surgical Mutation with Gira-G
+Locate and edit only the affected AST node:
+```bash
+gira outline <file>
+gira read <file> <symbol>
+gira write <file> <symbol> --body '<safe implementation>'
+```
 
-### Fase 4: Portão de Verificação (Verification Gate)
-- Execute a suíte de testes de ponta a ponta:
-  - No Go: `go test ./...`
-  - No TypeScript: `bun test`
-- Garanta **zero regressões** na suíte prévia.
+### Phase 4: Verification Gate
+Run full verification suite with zero regressions:
+```bash
+bun test
+pinga verify tasks/T<N>/PLAN.md
+```
 
-### Fase 5: Selagem no Ledger
-- Registre o recibo da auditoria no ledger do P-Ingá:
-  ```bash
-  bun bin/pinga.ts ledger verify
-  ```
+### Phase 5: Ledger Sealing
+Verify ledger integrity:
+```bash
+pinga ledger verify
+```
