@@ -89,4 +89,20 @@ flowchart LR
     expect(md).toContain("Visual Legibility");
     expect(md).toContain("Structural Ergonomics");
   });
+
+  it("5. runStaticChecks catches local file:// leaks and invalid flags (--symbol)", () => {
+    const leakyDoc = `
+# Leaky Doc
+Inspect:
+\`\`\`bash
+gira read --symbol Engine
+gira arch query
+\`\`\`
+Link: [Local File](file:///home/shibuka/Projetos/duh-homelab/gira-g/main.go)
+`;
+    const checks = runStaticChecks(leakyDoc, process.cwd());
+    expect(checks.unknownFlags.length).toBeGreaterThan(0);
+    expect(checks.unknownFlags.some((f) => f.includes("--symbol"))).toBe(true);
+    expect(checks.missingFiles.some((f) => f.includes("LEAK:file:///home/"))).toBe(true);
+  });
 });

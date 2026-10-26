@@ -154,6 +154,24 @@ export function runStaticChecks(content: string, repoRoot: string): DocsEvalResu
     }
   }
 
+  // 4. Inspect local file:// leakages (e.g. file:///home/...)
+  const plainText = content.replace(/<[^>]+>/g, " ");
+  const fileLeakRegex = /file:\/\/\/(?:home|Users|tmp|root)\/[^\s"'>)]+/g;
+  while ((match = fileLeakRegex.exec(content)) !== null) {
+    const leak = match[0];
+    if (!result.missingFiles.includes(leak)) {
+      result.missingFiles.push(`LEAK:${leak}`);
+    }
+  }
+
+  // 5. Inspect invalid flags in gira commands (e.g. --symbol on read/slice)
+  if (/gira\s+(?:read|slice)\s+.*--symbol/.test(plainText)) {
+    result.unknownFlags.push("--symbol on read/slice (positional required)");
+  }
+  if (/gira\s+arch\s+/.test(plainText)) {
+    result.unknownFlags.push("gira arch (non-existent command)");
+  }
+
   return result;
 }
 
@@ -179,21 +197,40 @@ export async function evaluateDocument(
       points: staticChecks.brokenMermaidBlocks * 5.0,
     });
   }
-  if (staticChecks.missingFiles.length > 0) {
+  const missingRepos = staticChecks.missingFiles.filter((f) => !f.startsWith("LEAK:"));
+  if (missingRepos.length > 0) {
     criticalDeductions.push({
       metric: "gra",
-      reason: `Arquivos citados não existem no repositório: ${staticChecks.missingFiles.slice(0, 3).join(", ")}`,
-      points: Math.min(15.0, staticChecks.missingFiles.length * 3.0),
+      reason: `Arquivos citados não existem no repositório: ${missingRepos.slice(0, 3).join(", ")}`,
+      points: Math.min(15.0, missingRepos.length * 3.0),
+    });
+  }
+  const fileLeaks = staticChecks.missingFiles.filter((f) => f.startsWith("LEAK:"));
+  if (fileLeaks.length > 0) {
+    criticalDeductions.push({
+      metric: "gra",
+      reason: `Vazamento de links locais absolutos file:/// detectados (${fileLeaks.length} ocorrências)`,
+      points: Math.min(25.0, fileLeaks.length * 5.0),
+    });
+  }
+  if (staticChecks.unknownFlags.length > 0) {
+    criticalDeductions.push({
+      metric: "ato",
+      reason: `Comandos CLI com sintaxe/flags inválidas: ${staticChecks.unknownFlags.join(", ")}`,
+      points: staticChecks.unknownFlags.length * 8.0,
     });
   }
 
   // Calculate rubric scores (1 to 5)
   // Base heuristic / semantic grading
   let graScore = 5;
-  if (staticChecks.missingFiles.length > 2) graScore = 3;
-  if (staticChecks.missingFiles.length > 5) graScore = 2;
+  if (missingRepos.length > 2 || fileLeaks.length > 0) graScore = 3;
+  if (missingRepos.length > 5 || fileLeaks.length > 5) graScore = 1;
 
   let atoScore = 4;
+  if (staticChecks.unknownFlags.length > 0) {
+    atoScore = Math.max(1, atoScore - 2);
+  }
   if (staticChecks.totalCommands === 0) {
     atoScore = 2;
     surgicalRecommendations.push({
