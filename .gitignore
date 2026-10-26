@@ -5,4 +5,5 @@ state/
 *.db-shm
 runs/
 .pinga/
+.gira/
 node_modules/

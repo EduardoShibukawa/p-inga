@@ -1,0 +1,10 @@
+version: 1
+target_system:
+  name: p-inga
+  description: "P-Ingá Formal Verification & Orchestration Engine"
+repositories:
+  - id: p-inga
+    url: "file://."
+    ref: "main"
+    sha: "8e248c0189883d0856177a5d82eda999f137c920"
+    path_scope: "."
