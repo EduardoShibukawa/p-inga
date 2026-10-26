@@ -7,3 +7,4 @@ runs/
 .pinga/
 .gira/
 node_modules/
+build/
