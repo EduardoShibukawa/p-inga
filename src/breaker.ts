@@ -54,7 +54,7 @@ export type InertiaResult = {
 };
 
 /**
- * Invariante I6: Disjuntor de Inércia (Read-Loop Breaker).
+ * Guardrail G1: Disjuntor de Inércia (Read-Loop Breaker).
  * Monitora o histórico recente de ações do agente.
  * Se o agente encadear N leituras consecutivas sem mutação ou execução de teste,
  * o disjuntor de inércia dispara uma intervenção reflexiva.
@@ -77,7 +77,7 @@ export function evaluateInertia(
     return {
       tripped: true,
       consecutiveReads,
-      warning: `DISJUNTOR P-INGÁ (Invariante I6): ${consecutiveReads} leituras consecutivas sem intervenção. O código não avança apenas com observação. Formule uma hipótese de teste ou execute uma alteração pontual agora.`,
+      warning: `DISJUNTOR P-INGÁ (Guardrail G1 - Inércia): ${consecutiveReads} leituras consecutivas sem intervenção. O código não avança apenas com observação. Formule uma hipótese de teste ou execute uma alteração pontual agora.`,
     };
   }
 

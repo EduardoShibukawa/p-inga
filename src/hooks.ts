@@ -23,7 +23,7 @@ export type PostToolTypeCheckResult = {
 export type { InertiaAction, InertiaResult };
 
 export const PAYLOAD_GUARD_REASON =
-  "VIOLAÇÃO P-INGÁ (Invariante I12): O arquivo já existe e o payload de escrita excede 100 linhas / 1500 caracteres. Para evitar truncamento de JSON e perda de contexto, use 'gira write <file> <symbol>' para alterar apenas a função alvo, ou 'gira add'.";
+  "VIOLAÇÃO P-INGÁ (Guardrail G2 - Payload Guard): O arquivo já existe e o payload de escrita excede 100 linhas / 1500 caracteres. Para evitar truncamento de JSON e perda de contexto, use 'gira write <file> <symbol>' para alterar apenas a função alvo, ou 'gira add'.";
 
 const READ_TOOLS = new Set(["read_file", "list_files", "search", "check_syntax"]);
 const WRITE_TOOLS = new Set(["write_file", "edit_file", "append_file"]);
@@ -46,7 +46,7 @@ function countLines(content: string): number {
 }
 
 /**
- * Invariante I12 — Guardrail pré-escrita.
+ * Guardrail G2 — Guardrail pré-escrita (PreTool Payload Guard).
  * Bloqueia sobrescritas monolíticas em arquivos já existentes, que são a
  * principal causa de truncamento de JSON e perda de contexto em LLMs.
  */
@@ -102,7 +102,7 @@ export async function postToolTypeCheckHook(
 }
 
 /**
- * Invariante I6 — Disjuntor de Inércia.
+ * Guardrail G1 — Disjuntor de Inércia (Read-Loop Breaker).
  * Classifica a ação atual, anexa ao histórico e avalia o encadeamento de
  * leituras consecutivas sem mutação ou teste.
  */

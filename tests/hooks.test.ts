@@ -33,7 +33,7 @@ describe("T24 — Guardrails baseados em Hooks", () => {
 
       expect(res.allowed).toBe(false);
       expect(res.reason).toBe(PAYLOAD_GUARD_REASON);
-      expect(res.reason).toContain("Invariante I12");
+      expect(res.reason).toContain("Guardrail G2");
       expect(res.reason).toContain("gira write <file> <symbol>");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -179,7 +179,7 @@ describe("T24 — Guardrails baseados em Hooks", () => {
     const third = postToolInertiaHook("search", { query: "foo" }, history);
     expect(third.tripped).toBe(true);
     expect(third.consecutiveReads).toBe(3);
-    expect(third.warning).toContain("Invariante I6");
+    expect(third.warning).toContain("Guardrail G1");
 
     // Mutação reseta o contador.
     const afterWrite = postToolInertiaHook(

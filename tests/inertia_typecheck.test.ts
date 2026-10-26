@@ -28,7 +28,7 @@ describe("T23 — Disjuntor de Inércia (Invariante I6) & Pre-Flight Check", () 
     const res = evaluateInertia(history);
     expect(res.tripped).toBe(true);
     expect(res.consecutiveReads).toBe(3);
-    expect(res.warning).toContain("Invariante I6");
+    expect(res.warning).toContain("Guardrail G1");
   });
 
   test("3. ação de escrita ou teste reseta o contador de inércia", () => {
