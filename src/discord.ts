@@ -53,9 +53,9 @@ export function resolveDiscordConfig(): DiscordConfig | null {
     }
   }
 
-  // Default homelab Discord notification channel
+  // Default homelab Discord notification channel (#hermes)
   if (!channelId) {
-    channelId = "1563615481665949789";
+    channelId = "1563272747591803110";
   }
 
   if (!token) {

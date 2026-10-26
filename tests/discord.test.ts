@@ -12,7 +12,7 @@ describe("T26 — Discord Notifications & Remote Observability (P-Ingá v0.7)", 
     expect(cfg).not.toBeNull();
     if (cfg) {
       expect(cfg.token.length).toBeGreaterThan(10);
-      expect(cfg.channelId).toBe("1563615481665949789");
+      expect(cfg.channelId).toBe("1563272747591803110");
     }
   });
 
