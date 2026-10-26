@@ -376,7 +376,32 @@ export const server = Bun.serve({
         });
       }
 
-      return Response.json({ nodes, edges, totalNodes: nodes.length, totalEdges: edges.length }, {
+      // Conecta simbolos de AST do P-Inga para formar uma arvore navegavel consistente
+      for (const n of nodes) {
+        if (n.data.id.startsWith("contract:") || n.data.id.startsWith("lib:")) {
+          edges.push({
+            data: {
+              id: `rel:core:p-inga->${n.data.id}`,
+              source: "core:p-inga",
+              target: n.data.id,
+              verb: n.data.kind === "Contract" ? "specifies" : "implements",
+            },
+          });
+        }
+      }
+
+      // Garante sanitizacao estrita: descarta qualquer aresta cujo source ou target nao exista
+      const nodeIds = new Set(nodes.map((n) => n.data.id));
+      const validEdges = edges.filter(
+        (e) => nodeIds.has(e.data.source) && nodeIds.has(e.data.target)
+      );
+
+      return Response.json({
+        nodes,
+        edges: validEdges,
+        totalNodes: nodes.length,
+        totalEdges: validEdges.length,
+      }, {
         headers: { "Access-Control-Allow-Origin": "*" },
       });
     }

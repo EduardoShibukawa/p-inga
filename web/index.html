@@ -1128,11 +1128,18 @@
         document.getElementById('kpi-ast-nodes').textContent = data.totalNodes || (data.nodes || []).length;
 
         const elements = [];
+        const nodeIds = new Set((data.nodes || []).map(n => n.data.id));
         (data.nodes || []).forEach(n => elements.push(n));
-        (data.edges || []).forEach(e => elements.push(e));
+        (data.edges || []).forEach(e => {
+          if (nodeIds.has(e.data.source) && nodeIds.has(e.data.target)) {
+            elements.push(e);
+          }
+        });
+
+        const cyContainer = document.getElementById('cy');
 
         cyInstance = cytoscape({
-          container: document.getElementById('cy'),
+          container: cyContainer,
           elements: elements,
           style: [
             {
@@ -1147,31 +1154,55 @@
                 'text-halign': 'center',
                 'text-outline-color': '#0f172a',
                 'text-outline-width': 2,
-                'width': 42,
-                'height': 42,
+                'width': 44,
+                'height': 44,
                 'border-width': 1.5,
                 'border-color': '#a78bfa',
               }
             },
             {
               selector: 'node[kind = "Contract"]',
-              style: { 'background-color': '#8b5cf6', 'shape': 'round-rectangle', 'width': 50, 'border-color': '#c4b5fd' }
+              style: { 'background-color': '#8b5cf6', 'shape': 'round-rectangle', 'width': 54, 'border-color': '#c4b5fd' }
             },
             {
               selector: 'node[kind = "Engine"]',
-              style: { 'background-color': '#10b981', 'shape': 'hexagon', 'width': 48, 'height': 48, 'border-color': '#34d399' }
+              style: { 'background-color': '#10b981', 'shape': 'hexagon', 'width': 50, 'height': 50, 'border-color': '#34d399' }
             },
             {
               selector: 'node[kind = "Storage"]',
-              style: { 'background-color': '#0ea5e9', 'shape': 'cylinder', 'width': 44, 'border-color': '#38bdf8' }
+              style: { 'background-color': '#0ea5e9', 'shape': 'cylinder', 'width': 46, 'border-color': '#38bdf8' }
             },
             {
               selector: 'node[kind = "Policy"]',
-              style: { 'background-color': '#f59e0b', 'shape': 'diamond', 'width': 46, 'border-color': '#fbbf24' }
+              style: { 'background-color': '#f59e0b', 'shape': 'diamond', 'width': 48, 'border-color': '#fbbf24' }
             },
             {
               selector: 'node[kind = "Entrypoint"]',
-              style: { 'background-color': '#ec4899', 'shape': 'octagon', 'width': 46, 'border-color': '#f472b6' }
+              style: { 'background-color': '#ec4899', 'shape': 'octagon', 'width': 48, 'border-color': '#f472b6' }
+            },
+            {
+              selector: 'node[kind = "Worker"]',
+              style: { 'background-color': '#06b6d4', 'shape': 'diamond', 'width': 48, 'border-color': '#22d3ee' }
+            },
+            {
+              selector: 'node[kind = "Library"]',
+              style: { 'background-color': '#6366f1', 'shape': 'round-rectangle', 'width': 46, 'border-color': '#818cf8' }
+            },
+            {
+              selector: 'node[kind = "Service"]',
+              style: { 'background-color': '#eab308', 'shape': 'star', 'width': 50, 'border-color': '#fde047' }
+            },
+            {
+              selector: 'node[id ^= "core:"]',
+              style: {
+                'font-weight': 'bold',
+                'font-size': '11px',
+                'width': 60,
+                'height': 60,
+                'border-width': 3,
+                'text-outline-width': 3,
+                'z-index': 10,
+              }
             },
             {
               selector: 'edge',
@@ -1194,13 +1225,22 @@
               selector: ':selected',
               style: {
                 'border-color': '#34d399',
-                'border-width': 3,
+                'border-width': 3.5,
                 'line-color': '#34d399',
                 'target-arrow-color': '#34d399',
               }
             }
           ],
-          layout: { name: 'cose', padding: 25, animate: false }
+          layout: {
+            name: 'concentric',
+            concentric: function(node) {
+              return node.id().startsWith('core:') ? 10 : 2;
+            },
+            levelWidth: function() { return 1; },
+            padding: 30,
+            animate: false,
+            fit: true,
+          }
         });
 
         // Evento de clique no nó do Grafo
@@ -1209,6 +1249,12 @@
           selectedGraphNode = node.data();
           showNodeInspector(selectedGraphNode);
         });
+
+        // Ajuste inicial se container já estiver visível
+        if (cyContainer.offsetWidth > 0) {
+          cyInstance.resize();
+          cyInstance.fit(30);
+        }
       }).catch(err => {
         console.error('Falha ao inicializar Cytoscape:', err);
       });
@@ -1240,12 +1286,35 @@
     }
 
     function fitGraph() {
-      if (cyInstance) cyInstance.fit(30);
+      if (cyInstance) {
+        cyInstance.resize();
+        cyInstance.fit(35);
+      }
     }
 
     function runGraphLayout(name) {
-      if (cyInstance) {
-        cyInstance.layout({ name: name, animate: true, animationDuration: 400 }).run();
+      if (!cyInstance) return;
+      cyInstance.resize();
+      if (name === 'concentric') {
+        cyInstance.layout({
+          name: 'concentric',
+          concentric: function(node) {
+            return node.id().startsWith('core:') ? 10 : 2;
+          },
+          levelWidth: function() { return 1; },
+          padding: 35,
+          animate: true,
+          animationDuration: 400,
+          fit: true,
+        }).run();
+      } else {
+        cyInstance.layout({
+          name: name,
+          padding: 35,
+          animate: true,
+          animationDuration: 400,
+          fit: true,
+        }).run();
       }
     }
 
@@ -1345,8 +1414,15 @@
         if (t === tab) {
           btn.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-slate-800 text-white shadow-sm transition';
           view.classList.remove('hidden');
-          if (t === 'graph' && cyInstance) {
-            setTimeout(() => cyInstance.resize(), 100);
+          if (t === 'graph') {
+            setTimeout(() => {
+              if (!cyInstance) {
+                initGraph();
+              } else {
+                cyInstance.resize();
+                cyInstance.fit(35);
+              }
+            }, 80);
           }
         } else {
           btn.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition';
