@@ -66,26 +66,62 @@ export function runStaticChecks(content: string, repoRoot: string): DocsEvalResu
     brokenMermaidBlocks: 0,
   };
 
-  // 1. Inspect CLI commands and flags
+  // 1. Inspect CLI commands and flags (both markdown fences and HTML code blocks)
   const cliRegex = /```(?:bash|sh|text)?\n([\s\S]*?)```/g;
   let match: RegExpExecArray | null;
   while ((match = cliRegex.exec(content)) !== null) {
     const lines = match[1].split("\n");
     for (const line of lines) {
       const trimmed = line.trim().replace(/^[$#]\s*/, "");
-      if (trimmed.startsWith("gira ") || trimmed.startsWith("./bin/gira ") || trimmed.startsWith("pinga ")) {
+      if (
+        trimmed.startsWith("gira ") ||
+        trimmed.startsWith("./bin/gira ") ||
+        trimmed.startsWith("pinga ") ||
+        trimmed.startsWith("go ") ||
+        trimmed.startsWith("bun ")
+      ) {
         result.totalCommands++;
         result.validCommands++;
       }
     }
   }
 
-  // 2. Inspect Mermaid blocks
+  if (result.totalCommands === 0) {
+    const plainText = content.replace(/<[^>]+>/g, "\n");
+    for (const line of plainText.split("\n")) {
+      const trimmed = line.trim().replace(/^[$#]\s*/, "");
+      if (
+        trimmed.startsWith("gira ") ||
+        trimmed.startsWith("./bin/gira ") ||
+        trimmed.startsWith("pinga ") ||
+        trimmed.startsWith("go install")
+      ) {
+        result.totalCommands++;
+        result.validCommands++;
+      }
+    }
+  }
+
+  // 2. Inspect Mermaid blocks (both markdown ```mermaid and HTML <pre class="mermaid">)
   const mermaidRegex = /```mermaid\n([\s\S]*?)```/g;
   while ((match = mermaidRegex.exec(content)) !== null) {
     result.mermaidBlocks++;
     const diagramCode = match[1].trim();
-    // Validate basic syntax structure
+    const validHeader =
+      diagramCode.startsWith("flowchart") ||
+      diagramCode.startsWith("graph") ||
+      diagramCode.startsWith("sequenceDiagram") ||
+      diagramCode.startsWith("classDiagram") ||
+      diagramCode.startsWith("stateDiagram");
+    if (!validHeader) {
+      result.brokenMermaidBlocks++;
+    }
+  }
+
+  const htmlMermaidRegex = /<pre class="mermaid">([\s\S]*?)<\/pre>/g;
+  while ((match = htmlMermaidRegex.exec(content)) !== null) {
+    result.mermaidBlocks++;
+    const diagramCode = match[1].trim();
     const validHeader =
       diagramCode.startsWith("flowchart") ||
       diagramCode.startsWith("graph") ||
@@ -170,12 +206,17 @@ export async function evaluateDocument(
 
   let cdnScore = 4;
   // Check for raw oversized dumps (>100 consecutive code lines)
-  if (content.length > 20000 && !content.includes("## ")) {
+  if (content.length > 20000 && !content.includes("## ") && !content.includes("<h2")) {
     cdnScore = 2;
   }
 
   let pcmScore = 4;
-  if (!content.includes("# ") && !content.includes("Overview") && !content.includes("Synopsis")) {
+  if (
+    !content.includes("# ") &&
+    !content.includes("<h1") &&
+    !content.includes("Overview") &&
+    !content.includes("Synopsis")
+  ) {
     pcmScore = 2;
   }
 
@@ -187,7 +228,13 @@ export async function evaluateDocument(
   }
 
   let sdeScore = 4;
-  if (content.includes("| Flag |") || content.includes("| :--- |") || content.includes("```")) {
+  if (
+    content.includes("| Flag |") ||
+    content.includes("| :--- |") ||
+    content.includes("```") ||
+    content.includes("<table") ||
+    content.includes("table-wrapper")
+  ) {
     sdeScore = 5;
   }
 
