@@ -34,7 +34,7 @@ jobs:
 
       - name: Install Gira-G CLI
         run: |
-          go install github.com/EduardoShibukawa/gira-g/cmd/gira@main
+          GOPROXY=direct go install github.com/EduardoShibukawa/gira-g/cmd/gira@main
 
       - name: Build living architecture and complete documentation portal
         run: |
