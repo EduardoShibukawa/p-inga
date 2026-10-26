@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import {
   BREAKER_EXIT,
@@ -54,6 +54,10 @@ export function verifyPlan(
   opts?: VerifyOptions,
 ): number {
   const resolvedPlanPath = resolve(planPath);
+  if (!existsSync(resolvedPlanPath)) {
+    console.error(`Erro: arquivo de plano não encontrado em ${resolvedPlanPath}`);
+    return 3;
+  }
   const task = basename(dirname(resolvedPlanPath));
 
   const gitRoot = Bun.spawnSync(
