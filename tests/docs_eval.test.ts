@@ -97,12 +97,14 @@ Inspect:
 \`\`\`bash
 gira read --symbol Engine
 gira arch query
+gira gate --strict
 \`\`\`
 Link: [Local File](file:///home/shibuka/Projetos/duh-homelab/gira-g/main.go)
 `;
     const checks = runStaticChecks(leakyDoc, process.cwd());
     expect(checks.unknownFlags.length).toBeGreaterThan(0);
     expect(checks.unknownFlags.some((f) => f.includes("--symbol"))).toBe(true);
+    expect(checks.unknownFlags.some((f) => f.includes("gate-lint"))).toBe(true);
     expect(checks.missingFiles.some((f) => f.includes("LEAK:file:///home/"))).toBe(true);
   });
 });

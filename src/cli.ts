@@ -1244,7 +1244,7 @@ export async function runCli(argv: string[]): Promise<number> {
       console.log(renderScorecardMarkdown(evalRes));
     }
 
-    if (strict && evalRes.status === "fail") {
+    if (strict && evalRes.status !== "pass") {
       return 1;
     }
     return 0;
