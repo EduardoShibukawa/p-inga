@@ -9,6 +9,8 @@ import { preflightCheck } from "./typecheck";
 
 export const PAYLOAD_MAX_LINES = 100;
 export const PAYLOAD_MAX_CHARS = 1500;
+export const NEW_FILE_MAX_LINES = 120;
+export const NEW_FILE_MAX_CHARS = 2500;
 
 export type PreToolGuardResult = {
   allowed: boolean;
@@ -25,9 +27,12 @@ export type { InertiaAction, InertiaResult };
 export const PAYLOAD_GUARD_REASON =
   "VIOLAÇÃO P-INGÁ (Guardrail G2 - Payload Guard): O arquivo já existe e o payload de escrita excede 100 linhas / 1500 caracteres. Para evitar truncamento de JSON e perda de contexto, use 'gira write <file> <symbol>' para alterar apenas a função alvo, ou 'gira add'.";
 
+export const NEW_FILE_GUARD_REASON =
+  "VIOLAÇÃO P-INGÁ (Guardrail G2 - Payload Guard): O arquivo novo excede o limite de criação (120 linhas / 2500 caracteres). Crie apenas o esqueleto inicial com as assinaturas e use 'append_file' ou 'gira add' para preencher as implementações progressivamente.";
+
 const READ_TOOLS = new Set(["read_file", "list_files", "search", "check_syntax"]);
 const WRITE_TOOLS = new Set(["write_file", "edit_file", "append_file"]);
-const GIRA_READ_ACTIONS = new Set(["outline", "locate", "slice", "read"]);
+const GIRA_READ_ACTIONS = new Set(["outline", "locate", "slice", "read", "impact"]);
 const GIRA_WRITE_ACTIONS = new Set(["write", "add"]);
 
 function targetOf(args: Record<string, any>): string | undefined {
@@ -61,13 +66,19 @@ export function preToolPayloadGuard(
   if (target === undefined) return { allowed: true };
 
   const base = cwd ?? process.cwd();
-  if (!existsSync(resolve(base, target))) return { allowed: true };
+  const fileExists = existsSync(resolve(base, target));
 
   const content = typeof args?.content === "string" ? args.content : "";
   const lineCount = countLines(content);
 
-  if (lineCount > PAYLOAD_MAX_LINES || content.length > PAYLOAD_MAX_CHARS) {
-    return { allowed: false, reason: PAYLOAD_GUARD_REASON };
+  if (fileExists) {
+    if (lineCount > PAYLOAD_MAX_LINES || content.length > PAYLOAD_MAX_CHARS) {
+      return { allowed: false, reason: PAYLOAD_GUARD_REASON };
+    }
+  } else {
+    if (lineCount > NEW_FILE_MAX_LINES || content.length > NEW_FILE_MAX_CHARS) {
+      return { allowed: false, reason: NEW_FILE_GUARD_REASON };
+    }
   }
 
   return { allowed: true };
@@ -109,7 +120,8 @@ export async function postToolTypeCheckHook(
 export function postToolInertiaHook(
   toolName: string,
   args: Record<string, any>,
-  history: InertiaAction[]
+  history: InertiaAction[],
+  success: boolean = true
 ): InertiaResult {
   const action = args?.action ?? args?.command;
   const target = targetOf(args);
@@ -120,7 +132,7 @@ export function postToolInertiaHook(
     type = "read";
   } else if (WRITE_TOOLS.has(toolName)) {
     type = "write";
-  } else if (toolName === "run_tests") {
+  } else if (toolName === "run_tests" || toolName === "run_python") {
     type = "test";
   } else if (toolName === "gira_context") {
     if (GIRA_READ_ACTIONS.has(action)) type = "read";
@@ -128,7 +140,11 @@ export function postToolInertiaHook(
   }
 
   if (type !== undefined) {
-    history.push({ type, ...(target !== undefined ? { target } : {}) });
+    history.push({
+      type,
+      ...(target !== undefined ? { target } : {}),
+      ...(success === false ? { success: false } : {}),
+    });
   }
 
   return evaluateInertia(history);

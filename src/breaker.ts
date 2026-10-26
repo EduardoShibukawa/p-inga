@@ -45,6 +45,7 @@ export type InertiaActionType = "read" | "write" | "test";
 export type InertiaAction = {
   type: InertiaActionType;
   target?: string;
+  success?: boolean;
 };
 
 export type InertiaResult = {
@@ -68,6 +69,9 @@ export function evaluateInertia(
     const act = history[i]!;
     if (act.type === "read") {
       consecutiveReads++;
+    } else if (act.type === "write" && act.success === false) {
+      // Falha em mutação: trata como tentativa falhada sem zerar inércia
+      continue;
     } else {
       break;
     }

@@ -3,6 +3,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  NEW_FILE_GUARD_REASON,
+  NEW_FILE_MAX_CHARS,
+  NEW_FILE_MAX_LINES,
   PAYLOAD_GUARD_REASON,
   type InertiaAction,
   postToolInertiaHook,
@@ -58,17 +61,38 @@ describe("T24 — Guardrails baseados em Hooks", () => {
     }
   });
 
-  test("2. preToolPayloadGuard permite criação de arquivo novo ou arquivos curtos <= 100 linhas", () => {
+  test("2. preToolPayloadGuard permite criação de arquivo novo dentro do limite ou arquivos curtos <= 100 linhas", () => {
     const tmp = makeTempDir("pinga-hooks-allow-");
     try {
-      // Arquivo novo: mesmo payload grande é permitido (criação).
+      // Arquivo novo dentro do limite (<= 120 linhas): permitido.
       expect(
         preToolPayloadGuard(
           "write_file",
-          { path: "new.ts", content: lines(250) },
+          { path: "new.ts", content: lines(50) },
           tmp
         )
       ).toEqual({ allowed: true });
+
+      // Arquivo novo que excede 120 linhas: bloqueado com instrução de esqueleto.
+      const blockedNew = preToolPayloadGuard(
+        "write_file",
+        { path: "new.ts", content: lines(121) },
+        tmp
+      );
+      expect(blockedNew.allowed).toBe(false);
+      expect(blockedNew.reason).toBe(NEW_FILE_GUARD_REASON);
+      expect(blockedNew.reason).toContain("limite de criação (120 linhas / 2500 caracteres)");
+      expect(blockedNew.reason).toContain("append_file");
+      expect(blockedNew.reason).toContain("gira add");
+
+      // Arquivo novo que excede 2500 chars: bloqueado.
+      const blockedNewChars = preToolPayloadGuard(
+        "write_file",
+        { path: "new2.ts", content: "x".repeat(2501) },
+        tmp
+      );
+      expect(blockedNewChars.allowed).toBe(false);
+      expect(blockedNewChars.reason).toBe(NEW_FILE_GUARD_REASON);
 
       // Arquivo existente com exatamente 100 linhas curtas: permitido.
       const exactly100Lines = Array.from({ length: 100 }, (_, i) => `x${i}`).join("\n");
@@ -215,5 +239,56 @@ describe("T24 — Guardrails baseados em Hooks", () => {
       type: "test",
       target: "tests/a.test.ts",
     });
+  });
+
+  test("5. postToolInertiaHook: run_python, gira_context(impact) e mutação com success=false", () => {
+    const history: InertiaAction[] = [];
+
+    // gira_context(impact) é mapeado para read
+    const act1 = postToolInertiaHook(
+      "gira_context",
+      { action: "impact", target: "src/a.ts" },
+      history
+    );
+    expect(act1.tripped).toBe(false);
+    expect(act1.consecutiveReads).toBe(1);
+
+    // Segunda leitura
+    const act2 = postToolInertiaHook("read_file", { path: "src/b.ts" }, history);
+    expect(act2.consecutiveReads).toBe(2);
+
+    // Mutação com falha (success: false): NÃO zera inércia!
+    const failedWrite = postToolInertiaHook(
+      "write_file",
+      { path: "src/c.ts" },
+      history,
+      false
+    );
+    expect(failedWrite.consecutiveReads).toBe(2);
+    expect(failedWrite.tripped).toBe(false);
+
+    // Terceira leitura: atinge o limiar e desarma (3 leituras consecutivas)
+    const act3 = postToolInertiaHook("read_file", { path: "src/d.ts" }, history);
+    expect(act3.consecutiveReads).toBe(3);
+    expect(act3.tripped).toBe(true);
+
+    // Outra mutação com falha: continua desarmado!
+    const failedWrite2 = postToolInertiaHook(
+      "edit_file",
+      { path: "src/c.ts" },
+      history,
+      false
+    );
+    expect(failedWrite2.consecutiveReads).toBe(3);
+    expect(failedWrite2.tripped).toBe(true);
+
+    // run_python conta como teste e reseta inércia
+    const afterPython = postToolInertiaHook(
+      "run_python",
+      { script: "test.py" },
+      history
+    );
+    expect(afterPython.consecutiveReads).toBe(0);
+    expect(afterPython.tripped).toBe(false);
   });
 });
