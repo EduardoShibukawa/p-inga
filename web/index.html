@@ -262,6 +262,7 @@
           <button onclick="setFilterStatus('pass')" id="filter-pass" class="px-2 py-1 rounded bg-slate-900 text-slate-400 border border-slate-800 hover:text-emerald-400">Pass</button>
           <button onclick="setFilterStatus('blocked')" id="filter-blocked" class="px-2 py-1 rounded bg-slate-900 text-slate-400 border border-slate-800 hover:text-amber-400">Blocked</button>
           <button onclick="setFilterStatus('fail')" id="filter-fail" class="px-2 py-1 rounded bg-slate-900 text-slate-400 border border-slate-800 hover:text-rose-400">Fail</button>
+          <button onclick="setFilterStatus('not run')" id="filter-not-run" class="px-2 py-1 rounded bg-slate-900 text-slate-400 border border-slate-800 hover:text-sky-400">Not Run</button>
         </div>
       </div>
     </div>
@@ -938,7 +939,7 @@
       }
 
       tbody.innerHTML = filtered.map(r => {
-        let statusBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300">not run</span>';
+        let statusBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-950/70 text-sky-400 border border-sky-800/70">NOT RUN</span>';
         if (r.status === 'pass') statusBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">PASS</span>';
         else if (r.status === 'blocked') statusBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-400 border border-amber-800 animate-pulse">BLOCKED</span>';
         else if (r.status === 'fail') statusBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800">FAIL</span>';
@@ -983,8 +984,10 @@
 
     function setFilterStatus(status) {
       currentFilterStatus = status;
-      ['all', 'pass', 'blocked', 'fail'].forEach(s => {
-        const btn = document.getElementById(`filter-${s}`);
+      ['all', 'pass', 'blocked', 'fail', 'not run'].forEach(s => {
+        const btnId = `filter-${s.replace(' ', '-')}`;
+        const btn = document.getElementById(btnId);
+        if (!btn) return;
         if (s === status) {
           btn.className = 'px-2 py-1 rounded bg-slate-800 text-emerald-400 border border-emerald-700 font-bold';
         } else {
