@@ -1,0 +1,35 @@
+Você é o orquestrador e implementador do P-Ingá.
+Sua missão é implementar os Guardrails baseados em Hooks do P-Ingá em `src/hooks.ts` e seus testes unitários em `tests/hooks.test.ts`.
+
+### Requisitos Técnicos:
+1. Em `src/hooks.ts`:
+   - `preToolPayloadGuard(toolName: string, args: Record<string, any>, cwd?: string): { allowed: boolean; reason?: string }`:
+     - Se `toolName === "write_file"`, e o arquivo indicado em `args.path` já existe no disco (`existsSync(resolve(cwd, args.path))`), e o conteúdo (`args.content`) tiver mais de 100 linhas ou mais de 1500 caracteres:
+       - Retorne `{ allowed: false, reason: "VIOLAÇÃO P-INGÁ (Invariante I12): O arquivo já existe e o payload de escrita excede 100 linhas / 1500 caracteres. Para evitar truncamento de JSON e perda de contexto, use 'gira write <file> <symbol>' para alterar apenas a função alvo, ou 'gira add'." }`.
+     - Caso contrário, retorne `{ allowed: true }`.
+
+   - `postToolTypeCheckHook(toolName: string, args: Record<string, any>, cwd?: string): Promise<{ ok: boolean; diagnostics?: string }>`:
+     - Se `toolName` for `"write_file"`, `"edit_file"`, `"append_file"` ou `"gira_context"` com action `"write"` ou `"add"`:
+       - Chame `preflightCheck(args.path || args.target, cwd)` de `src/typecheck.ts`.
+       - Se `diagnostics` existir, retorne `{ ok: false, diagnostics: diagnostics }`.
+     - Caso contrário, retorne `{ ok: true }`.
+
+   - `postToolInertiaHook(toolName: string, args: Record<string, any>, history: InertiaAction[]): InertiaResult`:
+     - Atualize o histórico com a ação atual:
+       - Se for leitura (`"read_file"`, `"list_files"`, `"search"`, `"check_syntax"` ou `"gira_context"` com action `"outline"`, `"locate"`, `"slice"`, `"read"`), o tipo é `"read"`.
+       - Se for mutação (`"write_file"`, `"edit_file"`, `"append_file"` ou `"gira_context"` com action `"write"`, `"add"`), o tipo é `"write"`.
+       - Se for teste (`"run_tests"`), o tipo é `"test"`.
+     - Chame `evaluateInertia(history)` de `src/breaker.ts` e retorne o resultado.
+
+   - Exporte todas as funções e tipos em `src/hooks.ts`.
+
+2. Em `tests/hooks.test.ts`:
+   - Crie testes cobrindo:
+     - `preToolPayloadGuard` bloqueia escrita monolítica > 100 linhas em arquivo existente.
+     - `preToolPayloadGuard` permite criação de arquivo novo ou arquivos curtos <= 100 linhas.
+     - `postToolTypeCheckHook` executa a checagem e anexa erros de sintaxe em arquivos TypeScript.
+     - `postToolInertiaHook` desvia ao atingir 3 leituras consecutivas e reseta com mutação.
+
+3. Validação:
+   - Execute `bun test tests/hooks.test.ts` e certifique-se de que passa com 100% verde.
+   - Execute a suíte completa com `bun test` e garanta zero regressões.

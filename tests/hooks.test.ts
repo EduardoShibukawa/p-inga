@@ -1,0 +1,219 @@
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  PAYLOAD_GUARD_REASON,
+  type InertiaAction,
+  postToolInertiaHook,
+  postToolTypeCheckHook,
+  preToolPayloadGuard,
+} from "../src/hooks";
+
+function makeTempDir(prefix: string): string {
+  return mkdtempSync(join(tmpdir(), prefix));
+}
+
+function lines(count: number, prefix = "export const line"): string {
+  return Array.from({ length: count }, (_, i) => `${prefix}${i} = ${i};`).join("\n");
+}
+
+describe("T24 — Guardrails baseados em Hooks", () => {
+  test("1. preToolPayloadGuard bloqueia escrita monolítica > 100 linhas em arquivo existente", () => {
+    const tmp = makeTempDir("pinga-hooks-guard-");
+    try {
+      writeFileSync(join(tmp, "existing.ts"), "export const short = 1;\n");
+
+      const payload = lines(101);
+      const res = preToolPayloadGuard(
+        "write_file",
+        { path: "existing.ts", content: payload },
+        tmp
+      );
+
+      expect(res.allowed).toBe(false);
+      expect(res.reason).toBe(PAYLOAD_GUARD_REASON);
+      expect(res.reason).toContain("Invariante I12");
+      expect(res.reason).toContain("gira write <file> <symbol>");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("1b. preToolPayloadGuard bloqueia payload de mais de 1500 caracteres em arquivo existente", () => {
+    const tmp = makeTempDir("pinga-hooks-guard-chars-");
+    try {
+      writeFileSync(join(tmp, "existing.ts"), "export const short = 1;\n");
+
+      const res = preToolPayloadGuard(
+        "write_file",
+        { path: "existing.ts", content: "x".repeat(1501) },
+        tmp
+      );
+
+      expect(res.allowed).toBe(false);
+      expect(res.reason).toBe(PAYLOAD_GUARD_REASON);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("2. preToolPayloadGuard permite criação de arquivo novo ou arquivos curtos <= 100 linhas", () => {
+    const tmp = makeTempDir("pinga-hooks-allow-");
+    try {
+      // Arquivo novo: mesmo payload grande é permitido (criação).
+      expect(
+        preToolPayloadGuard(
+          "write_file",
+          { path: "new.ts", content: lines(250) },
+          tmp
+        )
+      ).toEqual({ allowed: true });
+
+      // Arquivo existente com exatamente 100 linhas curtas: permitido.
+      const exactly100Lines = Array.from({ length: 100 }, (_, i) => `x${i}`).join("\n");
+      writeFileSync(join(tmp, "existing.ts"), "export const short = 1;\n");
+      expect(
+        preToolPayloadGuard(
+          "write_file",
+          { path: "existing.ts", content: exactly100Lines },
+          tmp
+        )
+      ).toEqual({ allowed: true });
+
+      // 100 linhas terminadas em newline continuam sendo 100 linhas.
+      expect(
+        preToolPayloadGuard(
+          "write_file",
+          { path: "existing.ts", content: `${exactly100Lines}\n` },
+          tmp
+        )
+      ).toEqual({ allowed: true });
+
+      // Ferramentas que não são write_file não passam pelo guard.
+      expect(
+        preToolPayloadGuard(
+          "edit_file",
+          { path: "existing.ts", content: lines(300) },
+          tmp
+        )
+      ).toEqual({ allowed: true });
+
+      // Sem conteúdo não há o que bloquear.
+      expect(
+        preToolPayloadGuard("write_file", { path: "existing.ts" }, tmp)
+      ).toEqual({ allowed: true });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("3. postToolTypeCheckHook executa a checagem e anexa erros de sintaxe em arquivos TypeScript", async () => {
+    const tmp = makeTempDir("pinga-hooks-typecheck-");
+    try {
+      writeFileSync(join(tmp, "broken.ts"), "export const answer = {\n");
+
+      const broken = await postToolTypeCheckHook(
+        "write_file",
+        { path: "broken.ts" },
+        tmp
+      );
+      expect(broken.ok).toBe(false);
+      expect(broken.diagnostics).toBeDefined();
+      expect(broken.diagnostics).toContain("DIAGNÓSTICO ESTÁTICO");
+
+      // edit_file e append_file também disparam a checagem.
+      const edited = await postToolTypeCheckHook(
+        "edit_file",
+        { path: "broken.ts" },
+        tmp
+      );
+      expect(edited.ok).toBe(false);
+      expect(edited.diagnostics).toContain("DIAGNÓSTICO ESTÁTICO");
+
+      writeFileSync(
+        join(tmp, "valid.ts"),
+        "export const answer: number = 42;\nexport function getAnswer(): number { return answer; }\n"
+      );
+      expect(
+        await postToolTypeCheckHook("append_file", { path: "valid.ts" }, tmp)
+      ).toEqual({ ok: true });
+
+      // gira_context só checa em ações de mutação.
+      const giraWrite = await postToolTypeCheckHook(
+        "gira_context",
+        { action: "write", target: "broken.ts" },
+        tmp
+      );
+      expect(giraWrite.ok).toBe(false);
+      expect(giraWrite.diagnostics).toContain("DIAGNÓSTICO ESTÁTICO");
+
+      expect(
+        await postToolTypeCheckHook(
+          "gira_context",
+          { action: "read", target: "broken.ts" },
+          tmp
+        )
+      ).toEqual({ ok: true });
+
+      // Ferramentas de leitura não disparam checagem.
+      expect(
+        await postToolTypeCheckHook("read_file", { path: "broken.ts" }, tmp)
+      ).toEqual({ ok: true });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("4. postToolInertiaHook desvia ao atingir 3 leituras consecutivas e reseta com mutação", () => {
+    const history: InertiaAction[] = [];
+
+    const first = postToolInertiaHook("read_file", { path: "src/a.ts" }, history);
+    expect(first.tripped).toBe(false);
+    expect(first.consecutiveReads).toBe(1);
+
+    const second = postToolInertiaHook("list_files", {}, history);
+    expect(second.tripped).toBe(false);
+    expect(second.consecutiveReads).toBe(2);
+
+    const third = postToolInertiaHook("search", { query: "foo" }, history);
+    expect(third.tripped).toBe(true);
+    expect(third.consecutiveReads).toBe(3);
+    expect(third.warning).toContain("Invariante I6");
+
+    // Mutação reseta o contador.
+    const afterWrite = postToolInertiaHook(
+      "write_file",
+      { path: "src/a.ts" },
+      history
+    );
+    expect(afterWrite.tripped).toBe(false);
+    expect(afterWrite.consecutiveReads).toBe(0);
+
+    // Três novas leituras voltam a desviar; gira_context outline conta como leitura.
+    postToolInertiaHook("gira_context", { action: "outline", target: "src/a.ts" }, history);
+    postToolInertiaHook("gira_context", { action: "locate", target: "src/a.ts" }, history);
+    const again = postToolInertiaHook(
+      "check_syntax",
+      { path: "src/a.ts" },
+      history
+    );
+    expect(again.tripped).toBe(true);
+    expect(again.consecutiveReads).toBe(3);
+
+    // run_tests reseta o contador.
+    const afterTest = postToolInertiaHook(
+      "run_tests",
+      { target: "tests/a.test.ts" },
+      history
+    );
+    expect(afterTest.tripped).toBe(false);
+    expect(afterTest.consecutiveReads).toBe(0);
+
+    expect(history[0]).toEqual({ type: "read", target: "src/a.ts" });
+    expect(history[history.length - 1]).toEqual({
+      type: "test",
+      target: "tests/a.test.ts",
+    });
+  });
+});

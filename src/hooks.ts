@@ -1,0 +1,135 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import {
+  evaluateInertia,
+  type InertiaAction,
+  type InertiaResult,
+} from "./breaker";
+import { preflightCheck } from "./typecheck";
+
+export const PAYLOAD_MAX_LINES = 100;
+export const PAYLOAD_MAX_CHARS = 1500;
+
+export type PreToolGuardResult = {
+  allowed: boolean;
+  reason?: string;
+};
+
+export type PostToolTypeCheckResult = {
+  ok: boolean;
+  diagnostics?: string;
+};
+
+export type { InertiaAction, InertiaResult };
+
+export const PAYLOAD_GUARD_REASON =
+  "VIOLAÇÃO P-INGÁ (Invariante I12): O arquivo já existe e o payload de escrita excede 100 linhas / 1500 caracteres. Para evitar truncamento de JSON e perda de contexto, use 'gira write <file> <symbol>' para alterar apenas a função alvo, ou 'gira add'.";
+
+const READ_TOOLS = new Set(["read_file", "list_files", "search", "check_syntax"]);
+const WRITE_TOOLS = new Set(["write_file", "edit_file", "append_file"]);
+const GIRA_READ_ACTIONS = new Set(["outline", "locate", "slice", "read"]);
+const GIRA_WRITE_ACTIONS = new Set(["write", "add"]);
+
+function targetOf(args: Record<string, any>): string | undefined {
+  const target = args?.path ?? args?.target;
+  return typeof target === "string" && target.length > 0 ? target : undefined;
+}
+
+/**
+ * Conta linhas de um payload de escrita, ignorando o terminador final.
+ * Um conteúdo "a\nb\n" tem 2 linhas; "a\nb" também tem 2 linhas.
+ */
+function countLines(content: string): number {
+  if (content.length === 0) return 0;
+  const lines = content.split(/\r\n|\r|\n/).length;
+  return content.endsWith("\n") || content.endsWith("\r") ? lines - 1 : lines;
+}
+
+/**
+ * Invariante I12 — Guardrail pré-escrita.
+ * Bloqueia sobrescritas monolíticas em arquivos já existentes, que são a
+ * principal causa de truncamento de JSON e perda de contexto em LLMs.
+ */
+export function preToolPayloadGuard(
+  toolName: string,
+  args: Record<string, any>,
+  cwd?: string
+): PreToolGuardResult {
+  if (toolName !== "write_file") return { allowed: true };
+
+  const target = targetOf(args);
+  if (target === undefined) return { allowed: true };
+
+  const base = cwd ?? process.cwd();
+  if (!existsSync(resolve(base, target))) return { allowed: true };
+
+  const content = typeof args?.content === "string" ? args.content : "";
+  const lineCount = countLines(content);
+
+  if (lineCount > PAYLOAD_MAX_LINES || content.length > PAYLOAD_MAX_CHARS) {
+    return { allowed: false, reason: PAYLOAD_GUARD_REASON };
+  }
+
+  return { allowed: true };
+}
+
+/**
+ * Hook pós-escrita: roda o pre-flight estático no arquivo alterado e devolve
+ * os diagnósticos para que o agente corrija a sintaxe imediatamente.
+ */
+export async function postToolTypeCheckHook(
+  toolName: string,
+  args: Record<string, any>,
+  cwd?: string
+): Promise<PostToolTypeCheckResult> {
+  const isGiraContextWrite =
+    toolName === "gira_context" &&
+    (GIRA_WRITE_ACTIONS.has(args?.action) || GIRA_WRITE_ACTIONS.has(args?.command));
+
+  if (!WRITE_TOOLS.has(toolName) && !isGiraContextWrite) {
+    return { ok: true };
+  }
+
+  const target = targetOf(args);
+  if (target === undefined) return { ok: true };
+
+  const result = preflightCheck(target, cwd ?? process.cwd());
+  if (result.diagnostics) {
+    return { ok: false, diagnostics: result.diagnostics };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Invariante I6 — Disjuntor de Inércia.
+ * Classifica a ação atual, anexa ao histórico e avalia o encadeamento de
+ * leituras consecutivas sem mutação ou teste.
+ */
+export function postToolInertiaHook(
+  toolName: string,
+  args: Record<string, any>,
+  history: InertiaAction[]
+): InertiaResult {
+  const action = args?.action ?? args?.command;
+  const target = targetOf(args);
+
+  let type: InertiaAction["type"] | undefined;
+
+  if (READ_TOOLS.has(toolName)) {
+    type = "read";
+  } else if (WRITE_TOOLS.has(toolName)) {
+    type = "write";
+  } else if (toolName === "run_tests") {
+    type = "test";
+  } else if (toolName === "gira_context") {
+    if (GIRA_READ_ACTIONS.has(action)) type = "read";
+    else if (GIRA_WRITE_ACTIONS.has(action)) type = "write";
+  }
+
+  if (type !== undefined) {
+    history.push({ type, ...(target !== undefined ? { target } : {}) });
+  }
+
+  return evaluateInertia(history);
+}
