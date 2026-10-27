@@ -72,6 +72,7 @@ export type Receipt = {
   created_at: string;
   flow?: string;
   base_ref?: string;
+  repo?: string;
   mode_effective?: Mode;
   mode_raised_by?: ModeRaisedBy;
   mode_override?: ModeOverride;
@@ -285,6 +286,7 @@ export function validateReceipt(
       "created_at",
       "flow",
       "base_ref",
+      "repo",
       "mode_effective",
       "mode_raised_by",
       "mode_override",
@@ -464,6 +466,7 @@ export function validateReceipt(
     }
 
     checkOptionalString(x, "flow", msg);
+    checkOptionalString(x, "repo", msg);
     if (x.base_ref !== undefined) {
       if (
         typeof x.base_ref !== "string" ||
