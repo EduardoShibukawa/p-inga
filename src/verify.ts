@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   BREAKER_EXIT,
   BREAKER_NEXT_ACTION,
@@ -66,6 +66,8 @@ export type VerifyOptions = {
   noBaseline?: boolean;
   requireDelta?: boolean;
   allowNoDelta?: boolean;
+  /** T59: opt-in estreito — libera scope_drift só nos arquivos do verifier. */
+  allowVerifierDrift?: boolean;
   usageFile?: string;
   overrideMode?: string;
   reason?: string;
@@ -204,6 +206,19 @@ export function verifyPlan(
     if (claimBaseline !== null) {
       changed = applyBaseline(repoRoot, changed, claimBaseline.dirty);
     }
+    // O ledger é artefato de runtime do próprio verifier: escrevê-lo (com
+    // `-wal`/`-shm`) não é trabalho da task. No repo publicado `*.db` está no
+    // .gitignore; sem essa exclusão, um ledger dentro da raiz de execução vira
+    // scope_drift espúrio em toda tentativa.
+    const ledgerInsideRepo = (() => {
+      const abs = resolve(ledgerPathArg ?? defaultLedgerPath());
+      const rel = relative(repoRoot, abs);
+      if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return [];
+      return [rel, `${rel}-wal`, `${rel}-shm`];
+    })();
+    if (ledgerInsideRepo.length > 0) {
+      changed = changed.filter((f) => !ledgerInsideRepo.includes(f));
+    }
 
     // Decisão de modo: todo recibo gerado a partir daqui carrega os campos.
     const decision: ModeDecision = resolveMode({
@@ -221,6 +236,9 @@ export function verifyPlan(
         : {}),
     };
 
+    // Drift liberado pelo verifier (T59): registrado no artefato, nunca silencioso.
+    let allowedDrift: string[] = [];
+
     if (baseSha !== null) {
       const guardRes = evaluateGuards({
         task,
@@ -229,6 +247,7 @@ export function verifyPlan(
         changed,
         requireDelta: opts?.requireDelta === true,
         allowNoDelta: opts?.allowNoDelta === true,
+        allowVerifierDrift: opts?.allowVerifierDrift === true,
       });
       if (!guardRes.ok) {
         const summary =
@@ -263,6 +282,9 @@ export function verifyPlan(
         ledger.append(receipt);
         console.log(JSON.stringify(receipt));
         return guardRes.exit;
+      }
+      if (guardRes.allowed_drift !== undefined) {
+        allowedDrift = [...guardRes.allowed_drift];
       }
     }
 
@@ -338,7 +360,19 @@ export function verifyPlan(
     });
     const duration_ms = Math.max(0, Date.now() - t0);
 
-    const outBuffer = Buffer.concat([res.stdout as Uint8Array, res.stderr as Uint8Array]);
+    const rawOut = Buffer.concat([res.stdout as Uint8Array, res.stderr as Uint8Array]);
+    // Cada liberação de scope_drift pelo verifier fica escrita no artefato: o
+    // recibo não pode esconder que houve escape do `touch`.
+    const outBuffer =
+      allowedDrift.length === 0
+        ? rawOut
+        : Buffer.concat([
+            Buffer.from(
+              allowedDrift.map((f) => `allowed_drift: ${f}\n`).join(""),
+              "utf8",
+            ),
+            rawOut,
+          ]);
     const attemptDir = join(repoRoot, "runs", task, String(attempt));
     mkdirSync(attemptDir, { recursive: true });
     writeFileSync(join(attemptDir, "out.txt"), outBuffer);

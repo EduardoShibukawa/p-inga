@@ -24,9 +24,16 @@ export type GuardInput = {
   requireDelta?: boolean;
   /** Desarma `delta_no_touch` (operador declara trabalho já existente). */
   allowNoDelta?: boolean;
+  /**
+   * Opt-in estreito (T59): libera `scope_drift` apenas para os arquivos do
+   * próprio verifier, e devolve quais foram liberados em `allowed_drift` para
+   * que o artefato não esconda o escape. Qualquer outro path fora do `touch`
+   * continua `scope_drift`.
+   */
+  allowVerifierDrift?: boolean;
 };
 export type GuardResult =
-  | { ok: true }
+  | { ok: true; allowed_drift?: string[] }
   | {
       ok: false;
       reason_code: "tests_frozen_changed";
@@ -38,6 +45,17 @@ export type GuardResult =
 
 export function alwaysAllowed(task: string): string[] {
   return [`tasks/${task}/EXEC.md`, `tasks/${task}/EVAL.md`];
+}
+
+/**
+ * Arquivos do próprio verifier. Só entram em `allowed` com `allowVerifierDrift`
+ * (T59): re-verificar task fechada sob um verifier novo não deve ser bloqueado
+ * por um `touch` antigo que não listava esses paths.
+ */
+export const VERIFIER_FILES = ["src/verify.ts", "src/receipt.ts", "src/guards.ts"];
+
+export function verifierFiles(): string[] {
+  return [...VERIFIER_FILES];
 }
 
 export function isProvisionalTest(path: string): boolean {
@@ -83,8 +101,12 @@ export function evaluateGuards(input: GuardInput): GuardResult {
     }
   }
 
+  let allowedDrift: string[] = [];
+
   if (input.touch !== undefined) {
-    const allowed = new Set([...input.touch, ...alwaysAllowed(input.task)]);
+    const declared = [...input.touch, ...alwaysAllowed(input.task)];
+    const released = input.allowVerifierDrift === true ? verifierFiles() : [];
+    const allowed = new Set([...declared, ...released]);
     const files = input.changed
       .filter((f) => !allowed.has(f) && !isProvisionalTest(f))
       .sort();
@@ -96,6 +118,14 @@ export function evaluateGuards(input: GuardInput): GuardResult {
         exit: GUARD_EXIT.scope_drift,
       };
     }
+
+    // Drift liberado = path do verifier que mudou e não estava declarado no
+    // `touch`. Vira `allowed_drift` no artefato; fora da flag nem é avaliado.
+    allowedDrift = released.length === 0
+      ? []
+      : input.changed
+          .filter((f) => released.includes(f) && !declared.includes(f))
+          .sort();
 
     // Recibo exige trabalho: nenhum arquivo do próprio `touch` mudou desde o
     // claim => o contrato já estava satisfeito antes desta tentativa. Metadado
@@ -109,9 +139,9 @@ export function evaluateGuards(input: GuardInput): GuardResult {
       input.allowNoDelta !== true &&
       input.touch.length > 0
     ) {
-      const declared = new Set([...input.touch, ...alwaysAllowed(input.task)]);
+      const declaredDelta = new Set(declared);
       const delta = input.changed.filter(
-        (f) => declared.has(f) && !isProvisionalTest(f),
+        (f) => declaredDelta.has(f) && !isProvisionalTest(f),
       );
       if (delta.length === 0) {
         return {
@@ -124,7 +154,7 @@ export function evaluateGuards(input: GuardInput): GuardResult {
     }
   }
 
-  return { ok: true };
+  return allowedDrift.length > 0 ? { ok: true, allowed_drift: allowedDrift } : { ok: true };
 }
 
 export function findRedBase(repoRoot: string, task: string): string | null {

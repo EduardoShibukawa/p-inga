@@ -42,7 +42,7 @@ import { supersedeTask } from "./supersede";
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga queue [--json] [--notify] [--root DIR] [--ledger PATH] [--claim [TASK] [--ttl S]] [--release TASK]
                    [--probe TASK | --probe-all] [--probe-timeout S]
-       pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base] [--no-baseline] [--require-delta] [--allow-no-delta]
+       pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base] [--no-baseline] [--require-delta] [--allow-no-delta] [--allow-verifier-drift]
        pinga supersede <TASK> --reason TEXTO [--ledger PATH] [--timeout S]
        pinga prove-red <PLAN.md> [--ledger PATH] [--base SHA]
        pinga mode <PLAN.md> [--base SHA] [--override-mode M --reason TEXTO]
@@ -470,6 +470,7 @@ export async function runCli(argv: string[]): Promise<number> {
     let noBaseline = false;
     let requireDelta = false;
     let allowNoDelta = false;
+    let allowVerifierDrift = false;
 
     for (let i = 0; i < rest.length; i++) {
       const arg = rest[i];
@@ -479,6 +480,8 @@ export async function runCli(argv: string[]): Promise<number> {
         requireDelta = true;
       } else if (arg === "--allow-no-delta") {
         allowNoDelta = true;
+      } else if (arg === "--allow-verifier-drift") {
+        allowVerifierDrift = true;
       } else if (arg === "--ledger") {
         const value = rest[i + 1];
         if (value === undefined || value === "") {
@@ -545,6 +548,7 @@ export async function runCli(argv: string[]): Promise<number> {
       noBaseline,
       requireDelta,
       allowNoDelta,
+      allowVerifierDrift,
     });
   }
 
