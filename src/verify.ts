@@ -28,6 +28,32 @@ function sha256hex(data: Buffer | string): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
+/**
+ * T57: `bun test` sobre arquivo sem nenhum `test()` imprime " 0 pass / 0 fail /
+ * Ran 0 tests" e sai com exit 0 — verde falso. Só comandos que invocam um
+ * runner de teste são inspecionados; o resto do done_when fica intacto.
+ */
+const TEST_RUNNER_RE = /(?:^|[\s;&|(])bun\s+test(?:\s|$)/;
+
+/** Exit próprio: runner rodou, mas nenhum teste foi executado. */
+export const NO_TESTS_RUN_EXIT = 11;
+
+/** Executou (não só passou) ao menos 1 teste? Lê as duas linhas de resumo do bun. */
+export function countExecutedTests(out: string): number {
+  let executed = 0;
+  for (const m of out.matchAll(/(\d+)\s+pass\b/g)) {
+    executed = Math.max(executed, Number(m[1]));
+  }
+  for (const m of out.matchAll(/Ran\s+(\d+)\s+tests?\b/g)) {
+    executed = Math.max(executed, Number(m[1]));
+  }
+  return executed;
+}
+
+export function invokesTestRunner(doneWhen: string): boolean {
+  return TEST_RUNNER_RE.test(doneWhen);
+}
+
 function authorFromEnv(): { model: string | null; family: string | null } {
   return {
     model: process.env.PINGA_AUTHOR_MODEL ?? null,
@@ -321,6 +347,14 @@ export function verifyPlan(
     const cmdSha256 = sha256hex(plan.done_when);
     const timedOut = Boolean(res.exitedDueToTimeout || res.exitCode === null);
 
+    // T57: runner que não executou teste algum não comprova nada, mesmo com
+    // exit 0 (arquivo vazio) ou exit 1 (filtro sem match).
+    const runnerCommand = invokesTestRunner(plan.done_when);
+    const executedTests = runnerCommand
+      ? countExecutedTests(outBuffer.toString("utf8"))
+      : null;
+    const noTestsRun = executedTests === 0;
+
     let status: Status;
     let reason_code: ReasonCode | null;
     let evidenceExit: number | null;
@@ -342,6 +376,16 @@ export function verifyPlan(
       evidenceExit = null;
       cliExit = 2;
       summary = normalSummary();
+    } else if (noTestsRun) {
+      status = "blocked";
+      reason_code = "no_tests_run";
+      evidenceExit = res.exitCode;
+      cliExit = NO_TESTS_RUN_EXIT;
+      summary =
+        `${task} blocked: done_when é runner de teste e executou 0 testes (exit ${res.exitCode}); receipt não comprova nada`.slice(
+          0,
+          280,
+        );
     } else if (res.exitCode === 0) {
       status = "pass";
       reason_code = null;

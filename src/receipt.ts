@@ -22,7 +22,20 @@ export const MAX_RECEIPT_BYTES = 4096;
 export const MAX_TEXT = 280;
 
 export type Status = (typeof STATUSES)[number];
-export type ReasonCode = (typeof REASON_CODES)[number];
+/**
+ * T57: códigos acrescentados depois do schema v1. `REASON_CODES` é snapshot
+ * congelado (tests/receipt.test.ts fixa a ordem exata), então o vocabulário
+ * vive aqui e o validador aceita a união — nenhum recibo novo fica inválido.
+ */
+export const EXTRA_REASON_CODES = ["no_tests_run"] as const;
+export const VALID_REASON_CODES: readonly string[] = [
+  ...REASON_CODES,
+  ...EXTRA_REASON_CODES,
+];
+
+export type ReasonCode =
+  | (typeof REASON_CODES)[number]
+  | (typeof EXTRA_REASON_CODES)[number];
 
 export type ArtifactRef = {
   path: string;
@@ -332,7 +345,7 @@ export function validateReceipt(
       }
     } else if (
       x.reason_code === undefined ||
-      !REASON_CODES.includes(x.reason_code as ReasonCode)
+      !VALID_REASON_CODES.includes(x.reason_code as string)
     ) {
       msg("invalid field: reason_code must be one of REASON_CODES when status is not \"pass\"");
     }
