@@ -97,7 +97,10 @@ describe("T60 · aviso do vigia so com task acionavel", () => {
   });
 
   test("task bloqueada avisa e diz o motivo", () => {
-    const root = mkRoot([{ task: "T60c", doneWhen: "false" }]);
+    // Bloqueio real vem de recibo `blocked` (aqui: done_when é runner e roda 0
+    // testes ⇒ no_tests_run). `done_when` que simplesmente falha é retomável e
+    // volta para `open` — não é bloqueio e não precisa acordar ninguém.
+    const root = mkRoot([{ task: "T60c", doneWhen: "bun test" }]);
     const ledger = join(root, "q.db");
 
     expect(queue(root, ledger).notice).toBeNull();
