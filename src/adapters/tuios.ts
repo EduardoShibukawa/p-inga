@@ -10,6 +10,15 @@ export const TUIOS_BACKUPS = [
   ".hermes/config.yaml.tuios.bak",
 ];
 
+/** Escritos pelo próprio `tuios install` (skills e plugins de agent-state). */
+export const TUIOS_OWNED = [
+  ".agents/skills/tuios/",
+  ".claude/skills/tuios/",
+  ".config/opencode/plugins/tuios-agent-state.js",
+  ".config/opencode/plugins/tuios-agent-state/",
+  ".hermes/plugins/tuios-agent-state/",
+];
+
 export const TUIOS_INSTALL_ARGS = [
   "integration",
   "install",
@@ -53,7 +62,7 @@ export const tuiosProbe: Probe = {
 export const tuiosAdapter: Adapter = {
   harness: "tuios",
   bin: "tuios",
-  targets: [...TUIOS_CONFIGS, ...TUIOS_BACKUPS],
+  targets: [...TUIOS_CONFIGS, ...TUIOS_BACKUPS, ...TUIOS_OWNED],
   owned: {},
   volatile: {},
   append: {
