@@ -136,6 +136,10 @@ if (args[0] === "plugin" && args[1] === "validate") {
 process.exit(1);
 `,
   opencode: `
+if (args[0] === "debug" && args[1] === "paths") {
+  process.stdout.write("home       " + process.env.HOME + "\\nconfig     " + process.env.HOME + "/.config/opencode\\n");
+  process.exit(0);
+}
 if (args[0] === "plugin" && args[1] === "list") {
   process.stdout.write("pi-harness\\nherdr-opencode\\n");
   process.exit(0);

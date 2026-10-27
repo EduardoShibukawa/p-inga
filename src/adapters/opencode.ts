@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Adapter, Probe } from "../install";
 
@@ -35,19 +35,29 @@ export function opencodePluginBytes(source: string): string | null {
   ].join("\n");
 }
 
+/**
+ * T48: `opencode plugin list` (v2) só mostra plugins com `tui.js`, e o nosso é
+ * server-only. Confere o arquivo gerado no config dir que o opencode reporta.
+ */
 export const opencodeProbe: Probe = {
   check: "plugin_list",
-  cmd: () => ["plugin", "list"],
+  cmd: () => ["debug", "paths"],
   classify: (r: { exit: number; stdout: string }) => {
     if (r.exit !== 0) {
-      return { status: "broken", detail: `plugin list exit ${r.exit}` };
+      return { status: "broken", detail: `debug paths exit ${r.exit}` };
     }
-    const has = r.stdout
-      .split(/\r?\n/)
-      .some((l) => l.includes("pi-harness"));
-    return has
-      ? { status: "ok", detail: "plugin pi-harness listado" }
-      : { status: "degraded", detail: "plugin pi-harness ausente" };
+    const config = r.stdout.match(/^config\s+(.+)$/m)?.[1]?.trim();
+    if (!config) return { status: "degraded", detail: "config dir ilegível" };
+    const file = join(config, "plugins", "pi-harness.ts");
+    let head = "";
+    try {
+      head = readFileSync(file, "utf8").split("\n", 1)[0] ?? "";
+    } catch {
+      return { status: "degraded", detail: "plugin pi-harness ausente" };
+    }
+    return head === OPENCODE_HEADER
+      ? { status: "ok", detail: "plugin pi-harness gerado presente" }
+      : { status: "degraded", detail: "plugin pi-harness sem cabeçalho do pinga" };
   },
 };
 
