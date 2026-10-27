@@ -29,8 +29,8 @@ import {
   canClaim,
   claim,
   formatQueueDigest,
+  formatQueueNotice,
   nextTask,
-  NOTIFY_STATES,
   readSnapshot,
   release,
   scanQueue,
@@ -407,17 +407,20 @@ export async function runCli(argv: string[]): Promise<number> {
     const report = scanQueue(scanOpts);
     const changes = transitions(previous, report);
     writeSnapshot(root, report);
+    // O que vai para o Discord: só transição acionável, uma linha cada.
+    // `null` = nada pediu ação do operador, e aí o vigia não manda nada.
+    const notice = formatQueueNotice(report, changes);
 
     if (json) {
-      console.log(JSON.stringify({ ...report, transitions: changes }, null, 2));
+      console.log(JSON.stringify({ ...report, transitions: changes, notice }, null, 2));
     } else {
       console.log(formatQueueDigest(report, changes));
     }
 
-    if (has("--notify") && changes.some((t) => NOTIFY_STATES.includes(t.to))) {
-      const sent = await notifyDigest(formatQueueDigest(report, changes));
+    if (has("--notify") && notice !== null) {
+      const sent = await notifyDigest(notice);
       if (!sent) {
-        console.error("notify: falha ao enviar digest para o Discord");
+        console.error("notify: falha ao enviar o aviso para o Discord");
         return 1;
       }
     }

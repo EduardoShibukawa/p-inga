@@ -506,12 +506,17 @@ export type QueueTransition = {
   to: QueueState;
 };
 
-/** Só transições que merecem aviso humano: entrar em blocked, invalid_plan ou done. */
+/**
+ * Só transições que merecem aviso humano: as que pedem ação do operador.
+ * `superseded` é ato nosso, `open` é enfileiramento nosso e `leased` é o
+ * executor trabalhando — nenhum deles acorda ninguém (T60: o vigia mandava o
+ * digest inteiro a cada 5 min por causa de `superseded`).
+ */
 export const NOTIFY_STATES: QueueState[] = [
+  "done",
   "blocked",
   "invalid_plan",
-  "done",
-  "superseded",
+  "awaiting_receipt",
 ];
 
 export function transitions(
@@ -558,5 +563,28 @@ export function formatQueueDigest(
       : null;
   const body = baseline === null ? tail : `${baseline}\n${tail}`;
   return `${head}\n${lines.join("\n")}\n${body}`;
+}
+
+/**
+ * Texto que vai para o Discord: uma linha por transição acionável (estado de
+ * destino + motivo) precedida de uma linha curta de contagem. `null` = nada
+ * acionável aconteceu, então o vigia não manda nada — silêncio é o estado
+ * normal de um run sem novidade para o operador.
+ */
+export function formatQueueNotice(
+  report: QueueReport,
+  changes: QueueTransition[],
+): string | null {
+  const actionable = changes.filter((t) => NOTIFY_STATES.includes(t.to));
+  if (actionable.length === 0) return null;
+  const c = report.counts;
+  const head = `queue: ${actionable.length} acionável(is) · open ${c.open} · awaiting_receipt ${c.awaiting_receipt} · blocked ${c.blocked} · leased ${c.leased} · done ${c.done}`;
+  const byTask = new Map(report.tasks.map((e) => [e.task, e]));
+  const lines = actionable.map((t) => {
+    const rc = byTask.get(t.task)?.reason_code;
+    const reason = rc === undefined || rc === null ? "" : ` reason=${rc}`;
+    return `  ${t.task}: ${t.from ?? "novo"} -> ${t.to}${reason}`;
+  });
+  return [head, ...lines].join("\n");
 }
 
