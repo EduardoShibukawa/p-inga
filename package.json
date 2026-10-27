@@ -7,6 +7,7 @@
     "pinga": "bin/pinga.ts"
   },
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "web": "bun bin/pinga.ts web"
   }
 }

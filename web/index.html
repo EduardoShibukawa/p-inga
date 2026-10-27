@@ -48,6 +48,21 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
 
   <style>
+    /* Banner de conexão / erro de requisição */
+    #conn-banner {
+      position: sticky; top: 0; z-index: 60;
+      display: none; align-items: center; gap: 12px;
+      padding: 10px 16px; font-size: 12px;
+      background: rgba(127, 29, 29, 0.92); color: #fecaca;
+      border-bottom: 1px solid #b91c1c; backdrop-filter: blur(8px);
+    }
+    #conn-banner.visible { display: flex; }
+    #conn-banner button {
+      margin-left: auto; padding: 4px 10px; border-radius: 6px;
+      background: #fecaca; color: #450a0a; font-weight: 700; font-size: 11px;
+    }
+    #conn-banner button:hover { background: #fff; }
+
     /* Custom Scrollbars */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #070a11; }
@@ -78,6 +93,12 @@
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-emerald-500/30 selection:text-emerald-300">
+  <!-- Falha de rede / servidor fora: estado sempre visível, nunca silencioso -->
+  <div id="conn-banner" role="alert">
+    <i data-lucide="wifi-off" class="w-4 h-4"></i>
+    <span id="conn-banner-text">Falha de comunicação com o servidor.</span>
+    <button onclick="retryAllLoaders()">Tentar de novo</button>
+  </div>
 
   <!-- ========================================== -->
   <!-- 1. TOP HEADER & QUICK ACTION BAR           -->
@@ -91,9 +112,9 @@
       </div>
       <div>
         <div class="flex items-center gap-2">
-          <span class="font-bold text-base tracking-tight text-white flex items-center gap-1.5">
+          <h1 class="m-0 font-bold text-base tracking-tight text-white flex items-center gap-1.5">
             P-Ingá <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-mono">v0.5.1</span>
-          </span>
+          </h1>
           <span class="text-xs text-slate-500 hidden sm:inline">|</span>
           <span class="text-xs text-slate-400 font-medium hidden sm:inline">Deterministic SDLC Governor</span>
         </div>
@@ -103,8 +124,11 @@
 
     <!-- Center Status Badges (G1, G2, I3) -->
     <div class="flex items-center gap-2">
+      <!-- Idade da última atualização de estado -->
+      <span id="last-update-badge" class="text-[11px] font-mono text-slate-500" title="Última resposta recebida do servidor">última atualização há --s</span>
+
       <!-- Connection Status -->
-      <div id="sse-badge" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
+      <div id="sse-badge" role="status" aria-live="polite" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
         <span class="text-[11px]">SSE Ativo</span>
       </div>
@@ -229,24 +253,26 @@
     <!-- Tab Navigation & Action Controls -->
     <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-3">
       <!-- Tabs -->
-      <div class="flex items-center gap-1 p-1 rounded-lg bg-slate-900 border border-slate-800">
-        <button onclick="switchTab('receipts')" id="tab-btn-receipts" class="flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-slate-800 text-white shadow-sm transition">
+      <nav aria-label="Seções do painel">
+      <div role="tablist" aria-label="Seções do painel" class="flex items-center gap-1 p-1 rounded-lg bg-slate-900 border border-slate-800">
+        <button onclick="switchTab('receipts')" id="tab-btn-receipts" role="tab" aria-selected="true" aria-controls="tab-receipts" class="flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-slate-800 text-white shadow-sm transition">
           <i data-lucide="scroll" class="w-4 h-4 text-emerald-400"></i>
           <span>Cadeia de Recibos</span>
         </button>
-        <button onclick="switchTab('scoreboard')" id="tab-btn-scoreboard" class="flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">
+        <button onclick="switchTab('scoreboard')" id="tab-btn-scoreboard" role="tab" aria-selected="false" aria-controls="tab-scoreboard" class="flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">
           <i data-lucide="bar-chart-3" class="w-4 h-4 text-sky-400"></i>
           <span>Placar Maestro</span>
         </button>
-        <button onclick="switchTab('graph')" id="tab-btn-graph" class="flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">
+        <button onclick="switchTab('graph')" id="tab-btn-graph" role="tab" aria-selected="false" aria-controls="tab-graph" class="flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">
           <i data-lucide="git-fork" class="w-4 h-4 text-purple-400"></i>
           <span>Grafo Semântico AST</span>
         </button>
-        <button onclick="switchTab('sessions')" id="tab-btn-sessions" class="flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">
+        <button onclick="switchTab('sessions')" id="tab-btn-sessions" role="tab" aria-selected="false" aria-controls="tab-sessions" class="flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">
           <i data-lucide="terminal" class="w-4 h-4 text-amber-400"></i>
           <span>Sessões & Agentes</span>
         </button>
       </div>
+      </nav>
 
       <!-- Real-time Filter & Search Input -->
       <div class="flex items-center gap-2 flex-1 max-w-md">
@@ -273,6 +299,8 @@
 
     <!-- TAB 1: CADEIA DE RECIBOS MERKLE -->
     <div id="tab-receipts" class="space-y-4">
+      <!-- Estado do ledger: presente ou ausente (com caminho e correção) -->
+      <div id="ledger-status" class="hidden"></div>
       <div class="glass-card rounded-xl border border-slate-800 overflow-hidden shadow-2xl">
         <div class="overflow-x-auto">
           <table class="w-full text-left border-collapse text-xs">
@@ -614,7 +642,7 @@
           <span>Saída do Processo:</span>
           <span id="verify-status-label" class="text-emerald-400 font-bold">Executando...</span>
         </div>
-        <pre class="p-3 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-300 max-h-48 overflow-y-auto"><code id="verify-output-text">Iniciando bin/pinga.ts verify...</code></pre>
+        <pre role="status" aria-live="polite" class="p-3 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-300 max-h-48 overflow-y-auto"><code id="verify-output-text">Iniciando bin/pinga.ts verify...</code></pre>
       </div>
     </div>
   </div>
@@ -830,10 +858,14 @@
     // ---------------------------------------------
     // SSE Real-Time Event Stream
     // ---------------------------------------------
+    let sseRetryDelay = 1000;
+
     function initSse() {
       const evtSource = new EventSource('/api/events');
 
       evtSource.onopen = () => {
+        sseRetryDelay = 1000;
+        markUpdated();
         const badge = document.getElementById('sse-badge');
         badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span><span class="text-[11px]">SSE Ativo</span>';
         badge.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/60';
@@ -843,7 +875,18 @@
         const badge = document.getElementById('sse-badge');
         badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span><span class="text-[11px]">Reconectando...</span>';
         badge.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-rose-950/60 text-rose-400 border border-rose-800/60';
+
+        // Backoff exponencial com teto de 30s: não martela o servidor.
+        evtSource.close();
+        const wait = sseRetryDelay;
+        sseRetryDelay = Math.min(sseRetryDelay * 2, 30000);
+        setTimeout(initSse, wait);
       };
+
+      // Heartbeat do servidor: prova que o stream está vivo mesmo sem eventos.
+      evtSource.addEventListener('heartbeat', () => {
+        markUpdated();
+      });
 
       // Recebe novos recibos selados
       evtSource.addEventListener('receipt', (e) => {
@@ -857,7 +900,9 @@
         try {
           const log = JSON.parse(e.data);
           appendLog(log);
-        } catch {}
+        } catch (err) {
+          reportFetchError('sse-log', err);
+        }
       });
 
       // Resultado de verificação
@@ -886,11 +931,24 @@
       else if (log.source === 'ast') tagColor = 'text-purple-400 font-bold';
       else if (log.level === 'error') tagColor = 'text-rose-400 font-bold';
 
-      div.innerHTML = `
-        <span class="text-slate-600">[${time}]</span>
-        <span class="${tagColor}">[${(log.source || 'SYS').toUpperCase()}]</span>
-        <span class="text-slate-200">${log.text}</span>
-      `;
+      // Conteúdo vindo do servidor entra como texto: nunca como HTML interpretado.
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'text-slate-600';
+      timeSpan.textContent = `[${time}]`;
+
+      const tagSpan = document.createElement('span');
+      tagSpan.className = tagColor;
+      tagSpan.textContent = `[${(log.source || 'SYS').toUpperCase()}]`;
+
+      const textSpan = document.createElement('span');
+      textSpan.className = 'text-slate-200';
+      textSpan.textContent = String(log.text ?? '');
+
+      timeSpan.textContent = `[${time}] `;
+      tagSpan.textContent = `[${(log.source || 'SYS').toUpperCase()}] `;
+      div.appendChild(timeSpan);
+      div.appendChild(tagSpan);
+      div.appendChild(textSpan);
       body.appendChild(div);
       body.scrollTop = body.scrollHeight;
 
@@ -899,6 +957,86 @@
       const count = body.children.length;
       badge.textContent = `${count} msgs`;
     }
+
+    // ---------------------------------------------
+    // Avisos: toast no canto + histórico que não some
+    // ---------------------------------------------
+    const toastHistory = [];
+
+    function showToast(message, kind = 'info') {
+      const text = String(message ?? '');
+      toastHistory.push({ at: new Date().toISOString(), kind, message: text });
+      if (toastHistory.length > 100) toastHistory.shift();
+
+      const stack = document.getElementById('toast-stack');
+      if (!stack) return;
+
+      const card = document.createElement('div');
+      card.className =
+        kind === 'error'
+          ? 'glass-card rounded-lg px-3 py-2 text-xs border border-rose-700/60 text-rose-200 shadow-lg'
+          : 'glass-card rounded-lg px-3 py-2 text-xs border border-slate-700 text-slate-200 shadow-lg';
+
+      const msg = document.createElement('div');
+      msg.className = 'whitespace-pre-wrap break-words';
+      msg.textContent = text;
+
+      const close = document.createElement('button');
+      close.className = 'mt-1 text-[10px] text-slate-400 hover:text-white';
+      close.textContent = 'fechar';
+      close.onclick = () => card.remove();
+
+      card.appendChild(msg);
+      card.appendChild(close);
+      stack.appendChild(card);
+      stack.scrollTop = stack.scrollHeight;
+    }
+
+    // Confirmação sem window.confirm: o pedido fica visível no painel.
+    function showConfirm(message, onConfirm) {
+      showToast(`${message}\n[confirmar]`, 'info');
+      const stack = document.getElementById('toast-stack');
+      if (!stack) return;
+      const card = stack.lastElementChild;
+      if (!card) return;
+      const msg = card.firstChild;
+      if (msg) msg.textContent = String(message);
+      const yes = document.createElement('button');
+      yes.className = 'mt-1 mr-2 text-[10px] font-semibold text-emerald-400 hover:text-emerald-300';
+      yes.textContent = 'confirmar';
+      yes.onclick = () => {
+        card.remove();
+        onConfirm();
+      };
+      card.insertBefore(yes, card.lastChild);
+    }
+
+    // ---------------------------------------------
+    // Idade da última atualização de estado
+    // ---------------------------------------------
+    let lastUpdateAt = null;
+
+    function markUpdated() {
+      lastUpdateAt = Date.now();
+      updateLastUpdateBadge();
+    }
+
+    function updateLastUpdateBadge() {
+      const badge = document.getElementById('last-update-badge');
+      if (!badge) return;
+      if (!lastUpdateAt) {
+        badge.textContent = 'última atualização há --s';
+        return;
+      }
+      const secs = Math.max(0, Math.floor((Date.now() - lastUpdateAt) / 1000));
+      badge.textContent = `última atualização há ${secs}s`;
+      badge.className =
+        secs > 30
+          ? 'text-[11px] font-mono text-amber-400'
+          : 'text-[11px] font-mono text-slate-500';
+    }
+
+    setInterval(updateLastUpdateBadge, 1000);
 
     function clearConsole() {
       document.getElementById('terminal-body').innerHTML = '<div class="text-slate-500">// Terminal limpo. Aguardando novos eventos...</div>';
@@ -920,18 +1058,90 @@
     }
 
     // ---------------------------------------------
+    // Falhas de rede / HTTP — sempre reportadas na UI
+    // ---------------------------------------------
+    let connBannerTimer = null;
+
+    function showConnectionBanner(message) {
+      const banner = document.getElementById('conn-banner');
+      document.getElementById('conn-banner-text').textContent = message;
+      banner.classList.add('visible');
+      if (connBannerTimer) clearTimeout(connBannerTimer);
+      // Some sozinho depois de 12s, mas o erro fica no terminal de logs.
+      connBannerTimer = setTimeout(() => banner.classList.remove('visible'), 12000);
+    }
+
+    function describeHttpFailure(res, payload) {
+      const detail = payload && (payload.error || payload.message);
+      return `HTTP ${res.status} ${res.statusText || ''}`.trim() + (detail ? ` — ${detail}` : '');
+    }
+
+    function reportFetchError(scope, err) {
+      const message = `${scope}: ${err && err.message ? err.message : String(err)}`;
+      // Mural de conexão: texto puro, nunca HTML.
+      const bannerText = document.getElementById('conn-banner-text');
+      if (bannerText) bannerText.textContent = message;
+      showConnectionBanner(message);
+      appendLog({
+        source: scope,
+        level: 'error',
+        text: message,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    async function requestJson(url, options) {
+      const res = await fetch(url, options);
+      let payload = null;
+      try {
+        payload = await res.json();
+      } catch (err) {
+        payload = { error: `resposta não é JSON (${err.message})` };
+      }
+      if (!res.ok) throw new Error(describeHttpFailure(res, payload));
+      return payload;
+    }
+
+    function retryAllLoaders() {
+      document.getElementById('conn-banner').classList.remove('visible');
+      loadPlans();
+      loadReceipts();
+      loadScoreboard();
+      loadBreakers();
+      initGraph();
+    }
+
+    // ---------------------------------------------
     // Data Loaders
     // ---------------------------------------------
     async function loadReceipts() {
       try {
-        const res = await fetch('/api/receipts');
-        const data = await res.json();
+        const data = await requestJson('/api/receipts');
         allReceipts = data.receipts || [];
         document.getElementById('kpi-receipts-count').textContent = data.total || allReceipts.length;
+        renderLedgerStatus(data.ledger);
         renderReceiptsTable();
       } catch (e) {
-        console.error('Falha ao carregar recibos:', e);
+        reportFetchError('recibos', e);
       }
+    }
+
+    // Ledger ausente é um estado de primeira classe, com caminho e correção.
+    function renderLedgerStatus(ledger) {
+      const box = document.getElementById('ledger-status');
+      if (!box) return;
+      if (!ledger) {
+        box.className = 'hidden';
+        return;
+      }
+      if (ledger.present) {
+        box.className = 'p-3 rounded-lg border border-emerald-800/60 bg-emerald-950/40 text-[11px] text-emerald-300 font-mono';
+        box.innerHTML = `<i data-lucide="database" class="w-3.5 h-3.5 inline"></i> ledger presente: <code>${ledger.path}</code>`;
+      } else {
+        box.className = 'p-3 rounded-lg border border-amber-800/60 bg-amber-950/40 text-[11px] text-amber-200 font-mono';
+        box.innerHTML = `<i data-lucide="database-zap" class="w-3.5 h-3.5 inline"></i> <strong>ledger ausente</strong>: <code>${ledger.path}</code><div class="mt-1 text-amber-300/90">${ledger.hint || ''}</div>`;
+      }
+      if (window.lucide) lucide.createIcons();
     }
 
     function renderReceiptsTable() {
@@ -1042,7 +1252,7 @@
           </tr>
         `).join('') || '<tr><td colspan="8" class="py-6 text-center text-slate-500">Nenhum operário registrado no learn.db.</td></tr>';
       } catch (e) {
-        console.error('Falha ao carregar scoreboard:', e);
+        reportFetchError('scoreboard', e);
       }
     }
 
@@ -1098,7 +1308,7 @@
           document.getElementById('kpi-breakers-text').className = 'text-xl font-bold font-mono text-emerald-400';
         }
       } catch (e) {
-        console.error('Falha ao carregar breakers:', e);
+        reportFetchError('breakers', e);
       }
     }
 
@@ -1114,7 +1324,7 @@
             <option value="${p.path}">[${p.id}] ${p.title} (${p.mode})</option>
           `).join('');
       } catch (e) {
-        console.error('Falha ao carregar planos:', e);
+        reportFetchError('planos', e);
       }
     }
 
@@ -1436,6 +1646,7 @@
       ['receipts', 'scoreboard', 'graph', 'sessions'].forEach(t => {
         const btn = document.getElementById(`tab-btn-${t}`);
         const view = document.getElementById(`tab-${t}`);
+        btn.setAttribute('aria-selected', t === tab ? 'true' : 'false');
         if (t === tab) {
           btn.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-slate-800 text-white shadow-sm transition';
           view.classList.remove('hidden');
@@ -1492,7 +1703,7 @@
       e.preventDefault();
       const planPath = document.getElementById('verify-plan-select').value;
       if (!planPath) {
-        alert('Selecione um plano PLAN.md');
+        showToast('Selecione um plano PLAN.md', 'error');
         return;
       }
 
@@ -1523,14 +1734,28 @@
             usage_file: usageFile || undefined,
           })
         });
-        const result = await res.json();
+        let result = null;
+        try {
+          result = await res.json();
+        } catch (parseErr) {
+          result = { success: false, error: `resposta ilegível do servidor (${parseErr.message})` };
+        }
+
+        // Um 500 traz {error} sem exitCode: ler o status antes de formatar evita imprimir "Exit" seguido de nulo.
+        if (!res.ok) {
+          outText.textContent = describeHttpFailure(res, result);
+          statusLabel.textContent = 'FALHA NA REQUISIÇÃO';
+          statusLabel.className = 'text-rose-400 font-bold';
+          reportFetchError('verify', new Error(describeHttpFailure(res, result)));
+          return;
+        }
 
         outText.textContent = result.output || (result.success ? 'Verificação concluída com sucesso!' : 'Falha na verificação.');
         if (result.success) {
           statusLabel.textContent = 'SUCESSO (PASS)';
           statusLabel.className = 'text-emerald-400 font-bold';
         } else {
-          statusLabel.textContent = `FALHA / BLOQUEIO (Exit ${result.exitCode})`;
+          statusLabel.textContent = `FALHA / BLOQUEIO (exit ${result.exitCode ?? 'n/d'})`;
           statusLabel.className = 'text-rose-400 font-bold';
         }
       } catch (err) {
@@ -1564,11 +1789,27 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ task, model, prompt })
         });
-        const result = await res.json();
-        alert(result.message || 'Despacho realizado com sucesso!');
+        let result = null;
+        try {
+          result = await res.json();
+        } catch (parseErr) {
+          result = { success: false, error: `resposta ilegível do servidor (${parseErr.message})` };
+        }
+        if (!res.ok) {
+          const detail = describeHttpFailure(res, result);
+          showConnectionBanner(`dispatch: ${detail}`);
+          showToast(`Falha ao despachar: ${detail}`, 'error');
+          return;
+        }
+        if (result.simulated) {
+          showToast(`Despacho SIMULADO (nenhum operário executou):\n\n${result.output || result.message || ''}`);
+        } else {
+          showToast(result.message || 'Despacho realizado com sucesso!');
+        }
         closeModal('dispatch-modal');
       } catch (err) {
-        alert(`Erro ao despachar: ${err.message}`);
+        reportFetchError('dispatch', err);
+        showToast(`Erro ao despachar: ${err.message}`, 'error');
       } finally {
         btn.disabled = false;
         btn.innerHTML = '<i data-lucide="rocket" class="w-4 h-4"></i><span>Despachar Agora</span>';
@@ -1579,9 +1820,14 @@
     // ---------------------------------------------
     // Form Action: POST /api/action/reset-breakers
     // ---------------------------------------------
-    async function submitResetBreakers(targetTask) {
-      if (!confirm(`Deseja resetar os disjuntores para ${targetTask || 'todas as tarefas bloqueadas'}?`)) return;
+    function submitResetBreakers(targetTask) {
+      showConfirm(
+        `Deseja resetar os disjuntores para ${targetTask || 'todas as tarefas bloqueadas'}?`,
+        () => doResetBreakers(targetTask),
+      );
+    }
 
+    async function doResetBreakers(targetTask) {
       try {
         const res = await fetch('/api/action/reset-breakers', {
           method: 'POST',
@@ -1589,11 +1835,11 @@
           body: JSON.stringify({ task: targetTask })
         });
         const result = await res.json();
-        alert(result.message || 'Disjuntores resetados!');
+        showToast(result.message || 'Disjuntores resetados!');
         loadBreakers();
         loadReceipts();
       } catch (err) {
-        alert(`Erro ao resetar: ${err.message}`);
+        showToast(`Erro ao resetar: ${err.message}`, 'error');
       }
     }
 
@@ -1721,9 +1967,11 @@
     function copyText(elementId) {
       const text = document.getElementById(elementId).innerText || document.getElementById(elementId).textContent;
       navigator.clipboard.writeText(text).then(() => {
-        alert('Copiado para a área de transferência!');
+        showToast('Copiado para a área de transferência!');
       });
     }
   </script>
+
+  <div id="toast-stack" role="status" aria-live="polite" aria-label="Avisos do painel" class="fixed bottom-4 right-4 z-[60] flex flex-col gap-2 w-80 max-h-[60vh] overflow-y-auto"></div>
 </body>
 </html>

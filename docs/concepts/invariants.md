@@ -21,7 +21,7 @@ P-Ingá verifies every execution against 20 inviolable rules. If any invariant i
 | **I9** | Canaries & Integrity | Golden canary hashes ensure verification harness has not been tampered with. |
 | **I10** | Monotonic Sequences | Ledger sequence numbers must strictly increment by 1 (`prev_hash` validation). |
 | **I11** | Zero In-Memory Drift | State between turns is strictly persisted to disk or ledger, never held in volatilized RAM. |
-| **I12** | Mode Monotonicity | Modes (`rapido`, `padrao`, `rigido`) can only be raised, never lowered silently. |
+| **I12** | Mode Monotonicity | Modos (`mvp`, `padrao`, `completo`) can only be raised, never lowered silently; a ordem e os nomes vêm do código. |
 | **I13** | Multi-Harness Parity | Pi, Claude, OpenCode, Hermes, and TUIOS must conform to uniform adapter protocols. |
 | **I14** | Atomic Mutations | Files modified during tasks must be written atomically via temp-file renaming. |
 | **I15** | Prove RED on Base | Every task must prove failure against the base commit before code changes are accepted. |
@@ -29,4 +29,4 @@ P-Ingá verifies every execution against 20 inviolable rules. If any invariant i
 | **I17** | Frozen Test Protection | Existing regression tests can never be modified or deleted without explicit approval. |
 | **I18** | Health Attestation | `pinga doctor` requires clean execution, zero exit code, and non-empty output. |
 | **I19** | Zero Network Egress in Eval | Offline evaluation runs must strictly forbid outbound network sockets. |
-| **I20** | Discord Observability | All verified ledger receipts must dispatch signed embeds to `#hermes / dev`. |
+| **I20** | Observabilidade Isolada | O recibo selado é a fonte de verdade; qualquer notificação externa é opcional, best-effort e nunca bloqueia nem altera a verificação. |

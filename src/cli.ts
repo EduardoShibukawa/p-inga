@@ -1,6 +1,6 @@
 import { evalPlan } from "./eval";
 import { examplesPlan } from "./examples";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { judgePlan } from "./judge";
 import { modePlan } from "./mode";
 import { isProvisionalTest, precommitDecision } from "./guards";
@@ -49,7 +49,119 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga maestro envelope <PLAN.md> [--ledger PATH] [--json]
        pinga maestro digest [--ledger PATH] [--db PATH] [--send] [--json]
        pinga compact <input.json> [--max-chars <n>] [--out <file>]
-       pinga docs eval <target> [--ledger PATH] [--repo PATH] [--strict] [--json] [--seal]`;
+       pinga docs eval <target> [--ledger PATH] [--repo PATH] [--strict] [--json] [--seal]
+       pinga docs links [DIR]
+       pinga web [--port N]`;
+
+/**
+ * Comandos de topo reconhecidos — usados na sugestão de "você quis dizer".
+ * Mantido perto do USAGE para não divergir da ajuda.
+ */
+const TOP_LEVEL_COMMANDS = [
+  "ledger",
+  "verify",
+  "prove-red",
+  "mode",
+  "judge",
+  "eval",
+  "examples",
+  "learn",
+  "precommit",
+  "install",
+  "adopt",
+  "doctor",
+  "tdd",
+  "maestro",
+  "compact",
+  "docs",
+  "web",
+];
+
+/** Distância de Levenshtein curta, só para sugerir comando próximo. */
+function editDistance(a: string, b: string): number {
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = tmp;
+    }
+  }
+  return prev[b.length];
+}
+
+function closestCommand(token: string): string | undefined {
+  let best: string | undefined;
+  let bestScore = Infinity;
+  for (const cmd of TOP_LEVEL_COMMANDS) {
+    const score = editDistance(token.toLowerCase(), cmd);
+    if (score < bestScore) {
+      bestScore = score;
+      best = cmd;
+    }
+  }
+  return bestScore <= 3 ? best : undefined;
+}
+
+/**
+ * `pinga docs links [DIR]`: todo link interno de docs/ precisa resolver no
+ * docsite (`.html` mapeia para o `.md` correspondente). Link morto → exit 1
+ * com `arquivo:linha: alvo`.
+ */
+function docsLinksCommand(target: string): number {
+  const dir = resolve(target);
+  if (!existsSync(dir)) {
+    console.error(`docs links: diretório não encontrado: ${target}`);
+    return 2;
+  }
+  if (!statSync(dir).isDirectory()) {
+    console.error(`docs links: esperava um diretório, recebi um arquivo: ${target}`);
+    return 2;
+  }
+
+  const linkRe = /\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  const broken: string[] = [];
+  let files = 0;
+  let links = 0;
+
+  const walk = (current: string): void => {
+    for (const entry of readdirSync(current).sort()) {
+      const full = join(current, entry);
+      if (statSync(full).isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!entry.endsWith(".md")) continue;
+      files++;
+      const content = readFileSync(full, "utf8").split("\n");
+      for (let lineNo = 0; lineNo < content.length; lineNo++) {
+        for (const match of content[lineNo].matchAll(linkRe)) {
+          const raw = match[1];
+          if (/^(https?:|mailto:|tel:|#)/.test(raw)) continue;
+          links++;
+          const bare = raw.split("#")[0].split("?")[0];
+          if (bare === "") continue;
+          const mapped = bare.endsWith(".html") ? `${bare.slice(0, -5)}.md` : bare;
+          const targetPath = resolve(full, "..", mapped);
+          if (!existsSync(targetPath)) {
+            broken.push(`${relative(dir, full)}:${lineNo + 1}: ${raw}`);
+          }
+        }
+      }
+    }
+  };
+
+  walk(dir);
+
+  if (broken.length > 0) {
+    for (const item of broken) console.error(item);
+    return 1;
+  }
+  console.log(`${links} links ok em ${files} arquivos`);
+  return 0;
+}
 
 /**
  * `pinga learn scan <arquivo...>`: aplica o scanner a cada arquivo e imprime
@@ -1230,6 +1342,13 @@ export async function runCli(argv: string[]): Promise<number> {
       return 2;
     }
 
+    if (statSync(targetFile).isDirectory()) {
+      console.error(
+        `docs eval: "${targetFile}" é um diretório — informe um arquivo .md (ex.: docs/intro.md)`,
+      );
+      return 2;
+    }
+
     const content = readFileSync(targetFile, "utf8");
     const evalRes = await evaluateDocument(content, targetFile, {
       ledgerPath,
@@ -1250,6 +1369,57 @@ export async function runCli(argv: string[]): Promise<number> {
     return 0;
   }
 
+  if (command === "web") {
+    const args = [subcommand, ...rest].filter((a): a is string => a !== undefined);
+    let portOverride: number | undefined;
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg === "--port") {
+        const value = args[++i];
+        const parsed = Number(value);
+        if (value === undefined || !Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
+          console.error("web: --port exige um inteiro entre 0 e 65535");
+          return 2;
+        }
+        portOverride = parsed;
+      } else if (arg === "--help" || arg === "-h") {
+        console.log("usage: pinga web [--port N]  (PINGA_WEB_PORT também define a porta)");
+        return 0;
+      } else {
+        console.error(USAGE);
+        return 2;
+      }
+    }
+
+    // Import tardio: só o comando `web` paga o custo de bun:sqlite e do servidor.
+    const { createDashboardServer, readDashboardConfig } = await import("../web/server");
+    const cfg = readDashboardConfig(process.env);
+    if (portOverride !== undefined) cfg.port = portOverride;
+    const panel = createDashboardServer(cfg);
+    console.log(`P-Ingá web em http://localhost:${panel.port} — Ctrl+C para encerrar`);
+    return await new Promise<number>((done) => {
+      const shutdown = (): void => {
+        try {
+          panel.stop();
+        } catch {
+          /* painel já encerrado */
+        }
+        done(0);
+      };
+      process.once("SIGINT", shutdown);
+      process.once("SIGTERM", shutdown);
+    });
+  }
+
+  if (command === "docs" && subcommand === "links") {
+    const [dir] = rest;
+    if (dir !== undefined && dir.startsWith("-")) {
+      console.error(USAGE);
+      return 2;
+    }
+    return docsLinksCommand(dir ?? "docs");
+  }
+
   if (command === "notify") {
     const message = [subcommand, ...rest].filter(Boolean).join(" ");
     if (!message) {
@@ -1265,7 +1435,19 @@ export async function runCli(argv: string[]): Promise<number> {
     return 0;
   }
 
-  console.error(USAGE);
+  if (command === undefined || command === "" || command === "--help" || command === "-h") {
+    console.error(USAGE);
+    return 2;
+  }
+
+  const suggestion = closestCommand(command);
+  console.error(`pinga: comando desconhecido: "${command}"`);
+  console.error(
+    suggestion
+      ? `dica: você quis dizer "pinga ${suggestion}"?`
+      : `dica: comandos disponíveis: ${TOP_LEVEL_COMMANDS.join(", ")}`,
+  );
+  console.error("uso: pinga <comando> [args] — rode sem argumentos para o usage completo");
   return 2;
 }
 

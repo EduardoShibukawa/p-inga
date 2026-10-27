@@ -52,5 +52,5 @@ If any actor attempts `UPDATE receipts` or `DELETE FROM receipts`, SQLite raises
 To verify the cryptographic chain of custody:
 
 ```bash
-bun .pinga/pinga-stable ledger verify
+bun bin/pinga.ts ledger verify
 ```

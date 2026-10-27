@@ -35,7 +35,6 @@ graph TD
   EXEC --> DW["Evaluate done_when"]
   DW --> GATES["Verify 20 Invariants (I1-I20)"]
   GATES --> LEDGER["Append Block to ledger.db"]
-  LEDGER --> DISCORD["Notify Discord (#hermes / dev)"]
 ```
 
-Next: Check out the [Quickstart Guide](guides/quickstart.html) to run your first verified task in 60 seconds.
+Next: Check out the [Quickstart Guide](./guides/quickstart.html) to run your first verified task in 60 seconds.

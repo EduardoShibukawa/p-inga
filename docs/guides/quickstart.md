@@ -13,7 +13,7 @@ Get up and running with P-Ingá formal verification in 3 simple steps.
 Verify your local harnesses, toolchain, and sandbox configuration:
 
 ```bash
-bun .pinga/pinga-stable doctor
+bun bin/pinga.ts doctor
 ```
 
 Output:
@@ -29,7 +29,7 @@ Output:
 P-Ingá stores every verification event in an append-only, tamper-evident hash chain. Verify the full cryptographic history:
 
 ```bash
-bun .pinga/pinga-stable ledger verify
+bun bin/pinga.ts ledger verify
 ```
 
 Output:
@@ -46,7 +46,7 @@ Every task in P-Ingá is driven by a formal specification file (`PLAN.md`).
 To verify a task plan against its contract:
 
 ```bash
-bun .pinga/pinga-stable verify tasks/T32/PLAN.md
+bun bin/pinga.ts verify tasks/T32/PLAN.md
 ```
 
 ### Verification Flow
@@ -61,5 +61,18 @@ graph LR
 ```
 
 When `done_when` exits with code 0, P-Ingá computes the SHA-256 digest of the execution log, signs the receipt, and appends a new block to `ledger.db`.
+
+## Step 4: Abrir o painel
+
+Todo o estado acima também é legível na interface web local — recibos, scoreboard
+e grafo, tudo em cima do mesmo `ledger.db` (somente leitura):
+
+```bash
+bun bin/pinga.ts web
+```
+
+O painel anuncia a URL no terminal (`http://localhost:4242` por padrão). Use
+`--port 0` para deixar o kernel escolher uma porta livre, ou `PINGA_WEB_PORT`
+para fixar outra.
 
 Next: Read about the [20 Core Invariants](../concepts/invariants.html) to understand the governance rules enforced by P-Ingá.
