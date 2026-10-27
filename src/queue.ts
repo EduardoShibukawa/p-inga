@@ -7,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { changedFiles, fileDigest } from "./guards";
@@ -16,6 +16,22 @@ import { parsePlan } from "./plan";
 
 export const QUEUE_VERSION = 1;
 export const DEFAULT_LEASE_TTL_S = 1800;
+export const SNAPSHOT_VERSION = 2;
+
+/**
+ * Procedência do snapshot (T58). Sem ela, um run que resolve para um ledger
+ * vazio grava `open` para toda task e o run seguinte — no ledger correto —
+ * anuncia a fila inteira como recém-concluída (54 transições falsas em
+ * 2026-10-27 11:04:54). Transição só é anunciada dentro da mesma procedência.
+ */
+export type QueueProvenance = {
+  /** 2 = snapshot com procedência; 1 = legado/corrompido (procedência desconhecida). */
+  v: number;
+  /** Caminho absoluto do ledger que produziu os estados; null = desconhecido. */
+  ledger: string | null;
+  /** true = estados adotados como baseline silencioso (nenhuma transição anunciada). */
+  baseline: boolean;
+};
 
 /**
  * Estados da fila. `done` exige receipt `pass` no ledger (zero auto-atestação):
@@ -53,6 +69,8 @@ export type QueueReport = {
   v: number;
   root: string;
   ledger: string | null;
+  /** Procedência deste run (T58): o ledger resolvido, exista o arquivo ou não. */
+  provenance: QueueProvenance;
   counts: Record<QueueState, number>;
   tasks: QueueEntry[];
 };
@@ -198,6 +216,10 @@ export function scanQueue(
 
   let ledgerPath: string | null = null;
   let rows: LedgerRowLite[] = opts.rows ?? [];
+  // Procedência (T58): o ledger RESOLVIDO deste run, exista o arquivo ou não.
+  // É o que distingue "mesma fila, ledger ainda vazio" de "outro ledger".
+  const requestedLedger =
+    opts.ledgerPath ?? (opts.rows === undefined ? defaultLedgerPath() : null);
 
   if (opts.rows === undefined) {
     const candidate = opts.ledgerPath ?? defaultLedgerPath();
@@ -218,6 +240,11 @@ export function scanQueue(
     v: QUEUE_VERSION,
     root,
     ledger: ledgerPath,
+    provenance: {
+      v: SNAPSHOT_VERSION,
+      ledger: requestedLedger === null ? null : resolve(requestedLedger),
+      baseline: false,
+    },
     counts: EMPTY_COUNTS(),
     tasks: [],
   };
@@ -400,19 +427,52 @@ export function snapshotPath(root: string): string {
   return join(root, ".pinga", "queue-snapshot.json");
 }
 
+/** Chave de procedência no JSON: `readSnapshot` só aceita string como estado. */
+export const SNAPSHOT_PROVENANCE_KEY = "__provenance";
+
+const UNKNOWN_PROVENANCE: QueueProvenance = { v: 1, ledger: null, baseline: false };
+
+/** Procedência do objeto que `readSnapshot` devolveu (não vai no JSON de estado). */
+const snapshotProvenance = new WeakMap<QueueSnapshot, QueueProvenance>();
+
+function provenanceOf(snapshot: QueueSnapshot): QueueProvenance | undefined {
+  return snapshotProvenance.get(snapshot);
+}
+
+function parseProvenance(raw: Record<string, unknown>): QueueProvenance {
+  const prov = raw[SNAPSHOT_PROVENANCE_KEY];
+  if (prov === null || typeof prov !== "object") return UNKNOWN_PROVENANCE;
+  const obj = prov as Record<string, unknown>;
+  return {
+    v: typeof obj.v === "number" ? obj.v : 1,
+    ledger: typeof obj.ledger === "string" ? obj.ledger : null,
+    baseline: obj.baseline === true,
+  };
+}
+
+function unknownSnapshot(): QueueSnapshot {
+  const empty: QueueSnapshot = {};
+  // Sem arquivo (ou ilegível) a procedência é desconhecida: o próximo run
+  // escreve baseline em silêncio em vez de anunciar a fila inteira.
+  snapshotProvenance.set(empty, UNKNOWN_PROVENANCE);
+  return empty;
+}
+
 export function readSnapshot(root: string): QueueSnapshot {
   const path = snapshotPath(root);
-  if (!existsSync(path)) return {};
+  if (!existsSync(path)) return unknownSnapshot();
   try {
     const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
-    if (raw === null || typeof raw !== "object") return {};
+    if (raw === null || typeof raw !== "object") return unknownSnapshot();
     const out: QueueSnapshot = {};
-    for (const [task, state] of Object.entries(raw as Record<string, unknown>)) {
+    const obj = raw as Record<string, unknown>;
+    for (const [task, state] of Object.entries(obj)) {
       if (typeof state === "string") out[task] = state as QueueState;
     }
+    snapshotProvenance.set(out, parseProvenance(obj));
     return out;
   } catch {
-    return {};
+    return unknownSnapshot();
   }
 }
 
@@ -420,7 +480,22 @@ export function writeSnapshot(root: string, report: QueueReport): void {
   const path = snapshotPath(root);
   const dir = join(root, ".pinga");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const snap: QueueSnapshot = {};
+
+  // Releitura do arquivo: `writeSnapshot` recebe só o run novo, e a decisão
+  // "isto é baseline?" depende da procedência e dos estados anteriores.
+  const previous = readSnapshot(root);
+  const prevProv = provenanceOf(previous) ?? UNKNOWN_PROVENANCE;
+  const current = report.provenance ?? UNKNOWN_PROVENANCE;
+  const sameLedger = prevProv.ledger === current.ledger;
+  const changed = sameLedger && report.tasks.some((entry) => previous[entry.task] !== entry.state);
+  // Baseline silencioso: procedência nova/desconhecida, ou baseline que uma
+  // transição real do mesmo ledger ainda não desfez.
+  const baseline = !sameLedger || (prevProv.baseline && !changed);
+
+  const provenance: QueueProvenance = { v: SNAPSHOT_VERSION, ledger: current.ledger, baseline };
+  report.provenance = provenance;
+
+  const snap: Record<string, unknown> = { [SNAPSHOT_PROVENANCE_KEY]: provenance };
   for (const entry of report.tasks) snap[entry.task] = entry.state;
   writeFileSync(path, `${JSON.stringify(snap, null, 2)}\n`);
 }
@@ -444,6 +519,12 @@ export function transitions(
   report: QueueReport,
 ): QueueTransition[] {
   const out: QueueTransition[] = [];
+  const prevProv = provenanceOf(previous);
+  const current = report.provenance ?? UNKNOWN_PROVENANCE;
+  // Procedência diferente (ou desconhecida) = snapshot de outro ledger: zero
+  // transições, baseline recriado. `undefined` = objeto que não veio de
+  // `readSnapshot`; aí vale a régua antiga (diff puro).
+  if (prevProv !== undefined && prevProv.ledger !== current.ledger) return out;
   for (const entry of report.tasks) {
     const from = previous[entry.task] ?? null;
     if (from === entry.state) continue;
@@ -468,6 +549,14 @@ export function formatQueueDigest(
     .map((t) => `  ${t.task}: ${t.from ?? "novo"} -> ${t.to}`);
   const tail =
     notify.length === 0 ? "  (sem transições para avisar)" : `transições:\n${notify.join("\n")}`;
-  return `${head}\n${lines.join("\n")}\n${tail}`;
+  // Baseline silencioso (T58) dito em voz alta: os estados salvos não foram
+  // derivados por transição, foram adotados.
+  const prov = report.provenance;
+  const baseline =
+    prov?.baseline === true
+      ? `  baseline: procedência recriada em ${prov.ledger ?? "ledger desconhecido"} — zero transições`
+      : null;
+  const body = baseline === null ? tail : `${baseline}\n${tail}`;
+  return `${head}\n${lines.join("\n")}\n${body}`;
 }
 
