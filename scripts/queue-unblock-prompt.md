@@ -3,16 +3,18 @@
 Abra uma janela Hermes dedicada dentro da worktree:
 
 ```bash
-cd /home/shibuka/Projetos/duh-homelab/p-inga-queue && hermes chat
+cd /home/shibuka/Projetos/duh-homelab/p-inga-exec && hermes chat
 ```
 
 Cole o prompt abaixo trocando `<T>` pela task (ex.: `T22`, `T01`, `T33`).
 
 ---
 
-Você trabalha SÓ em `/home/shibuka/Projetos/duh-homelab/p-inga-queue` (worktree, branch `task/task-queue`).
+Você trabalha SÓ em `/home/shibuka/Projetos/duh-homelab/p-inga-exec` (worktree, branch `work/exec`).
+Sincronize antes de começar: `git -C /home/shibuka/Projetos/duh-homelab/p-inga-exec reset --hard origin/main`
+(só com a árvore limpa).
 Nunca rode `git commit`, `git merge`, `git push` e nunca toque em
-`/home/shibuka/Projetos/duh-homelab/p-inga` (checkout principal).
+`/home/shibuka/Projetos/duh-homelab/p-inga` (raiz publicada, somente leitura).
 
 Objetivo: desbloquear a task `<T>` corrigindo a causa — nunca afrouxando a régua.
 
