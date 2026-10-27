@@ -87,7 +87,7 @@ const DEFAULT_ADAPTERS: Adapter[] = [
 ];
 
 export type InstallOptions = {
-  mode: "dry-run" | "apply" | "revert";
+  mode: "dry-run" | "apply" | "revert" | "rebaseline";
   home: string;
   manifestPath?: string;
   adapters?: Adapter[];
@@ -821,6 +821,31 @@ export async function installCmd(opts: InstallOptions): Promise<number> {
         JSON.stringify({ diff_sha256: diffSha }, null, 2) + "\n",
       );
       if (renderedDiff !== "") process.stdout.write(renderedDiff);
+      return INSTALL_EXIT.ok;
+    }
+
+    // T47: --rebaseline aceita o estado atual dos alvos como sha256_post, só
+    // com diff vazio já revisado num --dry-run. Nenhum alvo é escrito.
+    if (opts.mode === "rebaseline") {
+      let planSha: string | undefined;
+      try {
+        const parsed = JSON.parse(readFileSync(planPath, "utf8")) as { diff_sha256?: unknown };
+        if (typeof parsed.diff_sha256 === "string") planSha = parsed.diff_sha256;
+      } catch {
+        planSha = undefined;
+      }
+      if (renderedDiff !== "" || planSha !== diffSha) {
+        console.error(
+          "pinga install: --rebaseline exige diff vazio e um --dry-run prévio com o mesmo diff",
+        );
+        return INSTALL_EXIT.usage;
+      }
+      for (const e of manifest.entries) {
+        const current = sha256File(join(opts.home, e.target_file));
+        if (current !== "absent") e.sha256_post = current;
+      }
+      writeAtomic(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+      rmSync(planPath, { force: true });
       return INSTALL_EXIT.ok;
     }
 

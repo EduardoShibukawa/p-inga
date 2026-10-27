@@ -56,7 +56,7 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga learn promote <PROPOSED.md> --id <L-…> --to <LESSONS.md> [--by NOME]
        pinga learn audit [--db PATH] [--repo PATH] [--sample N] [--threshold T] [--json]
        pinga precommit [-- <cmd...>]
-       pinga install (--dry-run | --apply | --revert) [--only H] [--manifest PATH] [--home PATH]
+       pinga install (--dry-run | --apply | --revert | --rebaseline) [--only H] [--manifest PATH] [--home PATH]
        pinga adopt (--dry-run | --apply) [--home PATH] [--manifest PATH]
        pinga doctor [--json] [--only H] [--endpoint URL] [--home PATH] [--manifest PATH]
        pinga tdd list
@@ -691,7 +691,7 @@ export async function runCli(argv: string[]): Promise<number> {
 
     for (let i = 0; i < args.length; i++) {
       const arg = args[i];
-      if (arg === "--dry-run" || arg === "--apply" || arg === "--revert") {
+      if (arg === "--dry-run" || arg === "--apply" || arg === "--revert" || arg === "--rebaseline") {
         modes.add(arg);
       } else if (arg === "--home" || arg === "--manifest" || arg === "--only") {
         const value = args[i + 1];
@@ -724,7 +724,9 @@ export async function runCli(argv: string[]): Promise<number> {
       ? ("dry-run" as const)
       : modes.has("--apply")
         ? ("apply" as const)
-        : ("revert" as const);
+        : modes.has("--rebaseline")
+          ? ("rebaseline" as const)
+          : ("revert" as const);
     return installCmd({
       mode,
       home: resolvedHome,
