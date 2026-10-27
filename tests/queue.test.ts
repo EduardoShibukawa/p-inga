@@ -511,8 +511,8 @@ describe("15. superseded: task cujo contrato já está verde no base", () => {
     }
   });
 
-  test("15e. transição para superseded entra no digest de notificação", () => {
-    expect(NOTIFY_STATES.includes("superseded")).toBe(true);
+  test("15e. superseded não avisa: fechar sem trabalho é ato nosso (T60)", () => {
+    expect(NOTIFY_STATES.includes("superseded")).toBe(false);
   });
 
   test("15f. lastMeaningfulLine dá a pista da falha sem abrir o artefato", () => {

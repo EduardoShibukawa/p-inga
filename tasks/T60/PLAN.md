@@ -4,6 +4,7 @@ goal: "aviso do vigia no Discord só com task acionável: notice = apenas as tra
 touch:
   - src/queue.ts
   - src/cli.ts
+  - tests/queue.test.ts
 done_when: "bun test tests/queue_notify_acionavel.test.ts"
 tests_frozen: ["tests/queue_notify_acionavel.test.ts"]
 ---
