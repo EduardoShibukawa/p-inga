@@ -101,6 +101,17 @@ function normalizeTask(name: string): string {
   return m !== null ? `T${Number(m[1])}` : trimmed.toLowerCase();
 }
 
+/** `prove-red` emite `pass` ao provar que o contrato REPROVA no base: é prova de
+ * RED, nunca de conclusão. Recibos assim não podem fechar nem sustentar task. */
+function isProveRed(row: LedgerRowLite): boolean {
+  try {
+    const parsed = JSON.parse(row.body) as { flow?: unknown };
+    return parsed.flow === "prove_red";
+  } catch {
+    return false;
+  }
+}
+
 function latestReceipt(
   rows: LedgerRowLite[],
   task: string,
@@ -109,6 +120,7 @@ function latestReceipt(
   let best: { seq: number; status: string; reason_code: string | null } | null = null;
   for (const row of rows) {
     if (normalizeTask(row.task) !== wanted) continue;
+    if (isProveRed(row)) continue;
     if (best !== null && row.seq <= best.seq) continue;
     let reason: string | null = null;
     try {
@@ -133,7 +145,8 @@ const PROCEDURAL_REASON_CODES = new Set(["delta_no_touch", "model_unattested", "
 function hasPassReceipt(rows: LedgerRowLite[], task: string): boolean {
   const wanted = normalizeTask(task);
   return rows.some(
-    (row) => normalizeTask(row.task) === wanted && row.status === "pass",
+    (row) =>
+      normalizeTask(row.task) === wanted && row.status === "pass" && !isProveRed(row),
   );
 }
 

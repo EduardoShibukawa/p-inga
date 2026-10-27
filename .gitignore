@@ -11,3 +11,4 @@ build/
 # artefatos de fila (lease/baseline por task)
 tasks/*/.lease
 tasks/*/.baseline.json
+.bun/
