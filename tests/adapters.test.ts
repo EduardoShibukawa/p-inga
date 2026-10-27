@@ -334,7 +334,7 @@ process.exit(0);
     const h13 = makeHarnessHome();
     try {
       writeStubs(h13.bin, {
-        hermes: "Bun.sleepSync(5000); process.exit(0);",
+        tuios: "Bun.sleepSync(5000); process.exit(0);",
       });
       const r = runPinga(["install", "--dry-run"], {
         ...h13.env,

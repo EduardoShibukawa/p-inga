@@ -5,6 +5,7 @@ touch:
   - src/adapters/hermes.ts
   - tests/hermes_local_source.test.ts
   - tests/hermes_enable_config.test.ts
+  - tests/adapters.test.ts
   - tasks/T45/PLAN.md
 done_when: "bun test tests/hermes_enable_config.test.ts tests/hermes_local_source.test.ts"
 tests_frozen: ["tests/hermes_enable_config.test.ts"]
@@ -18,5 +19,5 @@ em `plugins.enabled` de <shadow>/.hermes/config.yaml (lista em bloco, como
 no config real), preservando o resto, sem duplicar, idempotente. Cria o
 arquivo/chaves se ausentes. Fontes Git/catálogo seguem com o CLI.
 Única mudança fora do append declarado (/plugins/enabled): nenhuma.
-T44 test ajustado: não espera mais `plugins enable` no log para fonte local.
+T44 test e timeout de adapters.test (stub hermes->tuios) ajustados.
 RED = hermes falso que sai 1 em `plugins enable`; apply local lança no base.

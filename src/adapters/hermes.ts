@@ -1,5 +1,7 @@
 import type { Adapter, AdapterContext, Probe } from "../install";
-import { existsSync, lstatSync, mkdirSync, readlinkSync, statSync, symlinkSync } from "node:fs";
+import {
+  existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { installTimeoutMs, nativeFailError, runNative } from "../shadow";
 
@@ -73,6 +75,47 @@ function linkLocalPlugin(shadowHome: string, source: string): void {
   symlinkSync(target, link);
 }
 
+/** Fonte local: habilita sem o CLI (que faz bootstrap completo na shadow),
+ * garantindo `pi-harness` em plugins.enabled do config.yaml. Edição textual
+ * mínima (preserva o resto), idempotente, só toca /plugins/enabled. */
+export function enableInConfig(shadowHome: string, id = "pi-harness"): void {
+  const path = join(shadowHome, HERMES_CONFIG);
+  const text = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const doc = (text.trim() === "" ? {} : Bun.YAML.parse(text)) as any;
+  const cur = doc?.plugins?.enabled;
+  if (Array.isArray(cur) && cur.includes(id)) return;
+  const lines = text === "" ? [] : text.replace(/\n$/, "").split("\n");
+  const pi = lines.findIndex((l) => /^plugins:\s*(#.*)?$/.test(l));
+  if (pi < 0) {
+    if (doc?.plugins !== undefined) throw new Error(`hermes: ${path}: plugins em formato não suportado`);
+    lines.push("plugins:", "  enabled:", `    - ${id}`);
+  } else {
+    let end = pi + 1;
+    while (end < lines.length && (/^\s/.test(lines[end]) || lines[end].trim() === "")) end++;
+    const ei = lines.slice(pi + 1, end).findIndex((l) => /^\s+enabled:/.test(l)) + pi + 1;
+    if (ei <= pi) {
+      lines.splice(pi + 1, 0, "  enabled:", `    - ${id}`);
+    } else {
+      const m = /^(\s+)enabled:\s*(.*)$/.exec(lines[ei])!;
+      const rest = m[2].replace(/#.*$/, "").trim();
+      if (rest === "" ) {
+        const item = lines[ei + 1] !== undefined ? /^(\s+)- /.exec(lines[ei + 1]) : null;
+        lines.splice(ei + 1, 0, `${item ? item[1] : m[1] + "  "}- ${id}`);
+      } else if (rest === "[]") {
+        lines.splice(ei, 1, `${m[1]}enabled:`, `${m[1]}  - ${id}`);
+      } else {
+        throw new Error(`hermes: ${path}: plugins.enabled em formato não suportado`);
+      }
+    }
+  }
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${lines.join("\n")}\n`);
+  const after = (Bun.YAML.parse(readFileSync(path, "utf8")) as any)?.plugins?.enabled;
+  if (!Array.isArray(after) || !after.includes(id)) {
+    throw new Error(`hermes: falha ao habilitar ${id} em ${path}`);
+  }
+}
+
 export const hermesAdapter: Adapter = {
   harness: "hermes",
   bin: "hermes",
@@ -92,7 +135,10 @@ export const hermesAdapter: Adapter = {
 
     if (isLocalDir(ctx.source)) {
       linkLocalPlugin(shadowHome, ctx.source);
-    } else {
+      enableInConfig(shadowHome);
+      return;
+    }
+    {
       const install = runNative(
         "hermes",
         ["plugins", "install", ctx.source],
