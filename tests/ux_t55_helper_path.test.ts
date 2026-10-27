@@ -18,11 +18,16 @@ describe("T55 · helper de teste herda PATH", () => {
     const td = tmp("t55-nopath-");
     const env = { HOME: td, XDG_STATE_HOME: td, TMPDIR: td } as Record<string, string>;
 
-    expect(() => runPinga(["--version"], env)).not.toThrow();
+    // `queue --json` é determinístico com ledger temporário e sempre emite JSON.
+    // `--version` não existe na CLI: media "comando desconhecido" (exit 2), e
+    // `tdd list` sai 0 com stdout vazio sob HOME sandbox — nenhum dos dois prova
+    // que o binário executou. `queue` prova.
+    const args = ["queue", "--json", "--ledger", join(td, "q.db")];
+    expect(() => runPinga(args, env)).not.toThrow();
 
-    const res = runPinga(["--version"], env);
+    const res = runPinga(args, env);
     expect(res.exit).toBe(0);
-    expect(res.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    expect(res.stdout.trim().startsWith("{")).toBe(true);
     expect(res.stderr).toBe("");
   });
 
@@ -36,8 +41,9 @@ describe("T55 · helper de teste herda PATH", () => {
       TMPDIR: td,
       PATH: process.env.PATH ?? "",
     };
-    const res = runPinga(["--version"], explícito);
+    const res = runPinga(["queue", "--json", "--ledger", join(td, "q.db")], explícito);
     expect(res.exit).toBe(0);
+    expect(res.stdout.trim().startsWith("{")).toBe(true);
   });
 
   test("as chaves de sandbox continuam removidas", () => {
