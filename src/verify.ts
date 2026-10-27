@@ -6,6 +6,8 @@ import {
   BREAKER_NEXT_ACTION,
   computeFailureSignature,
   lastReceiptFor,
+  repoScope,
+  scopedReceipts,
   shouldTrip,
 } from "./breaker";
 import { defaultLedgerPath, openLedger } from "./ledger";
@@ -110,11 +112,12 @@ export function verifyPlan(
   }
 
   const ledger = openLedger(ledgerPathArg ?? defaultLedgerPath());
+  const repo = repoScope(repoRoot);
 
   try {
     const attempt =
       attemptArg ??
-      1 + ledger.all().filter((row) => row.task === task).length;
+      1 + scopedReceipts(ledger, task, repo).length;
 
     const parsed = parsePlan(readFileSync(resolvedPlanPath, "utf8"));
 
@@ -125,6 +128,7 @@ export function verifyPlan(
         type: "task.receipt",
         id: randomUUID(),
         task,
+        ...(repo !== undefined ? { repo } : {}),
         status: "blocked",
         reason_code: "plan_invalid",
         attempts: attempt,
@@ -184,6 +188,7 @@ export function verifyPlan(
           type: "task.receipt",
           id: randomUUID(),
           task,
+          ...(repo !== undefined ? { repo } : {}),
           status: "blocked",
           reason_code: guardRes.reason_code,
           attempts: attempt,
@@ -240,6 +245,7 @@ export function verifyPlan(
             type: "task.receipt",
             id: randomUUID(),
             task,
+            ...(repo !== undefined ? { repo } : {}),
             status: blockStatus,
             reason_code: blockReason,
             attempts: attempt,
@@ -340,7 +346,7 @@ export function verifyPlan(
             out_sha256: hRun.artifact.sha256,
             reason_code: "overfit_holdout",
           });
-          const prev = lastReceiptFor(ledger, task);
+          const prev = lastReceiptFor(ledger, task, repo);
           if (shouldTrip(prev, sig)) {
             status = "blocked";
             reason_code = "breaker_same_failure";
@@ -371,7 +377,7 @@ export function verifyPlan(
         reason_code: "command_failed",
       });
       // Lê o último recibo da task ANTES de gravar o atual.
-      const prev = lastReceiptFor(ledger, task);
+      const prev = lastReceiptFor(ledger, task, repo);
 
       if (shouldTrip(prev, sig)) {
         status = "blocked";
@@ -400,6 +406,7 @@ export function verifyPlan(
       type: "task.receipt",
       id: randomUUID(),
       task,
+      ...(repo !== undefined ? { repo } : {}),
       status,
       reason_code,
       attempts: attempt,

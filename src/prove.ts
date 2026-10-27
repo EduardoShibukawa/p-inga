@@ -19,6 +19,7 @@ import type { Plan } from "./plan";
 import type { Evidence, ReasonCode, Receipt, Status } from "./receipt";
 import { receiptKind } from "./receipt";
 import { NOT_RUN_TOKENS } from "./tokens";
+import { repoScope, scopedReceipts } from "./breaker";
 
 /**
  * O git exporta variáveis de contexto de repositorio para os hooks (ex.:
@@ -362,16 +363,13 @@ export function provePlan(
   }
 
   const ledger = openLedger(opts?.ledgerPath ?? defaultLedgerPath());
+  const repo = repoScope(repoRoot);
   try {
     const n =
       1 +
-      ledger
-        .all()
-        .filter(
-          (r) =>
-            r.task === task &&
-            receiptKind(JSON.parse(r.body) as Receipt) === "prove_red",
-        ).length;
+      scopedReceipts(ledger, task, repo).filter(
+        (r) => receiptKind(r) === "prove_red",
+      ).length;
 
     const timeoutMs = process.env.PINGA_TIMEOUT_MS
       ? Number(process.env.PINGA_TIMEOUT_MS)
@@ -423,6 +421,7 @@ export function provePlan(
       type: "task.receipt",
       id: randomUUID(),
       task,
+      ...(repo !== undefined ? { repo } : {}),
       status,
       reason_code,
       attempts: n,
