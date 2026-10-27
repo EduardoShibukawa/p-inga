@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { canonicalJson } from "./canonical";
 import type { Ledger } from "./ledger";
 import type { ReasonCode, Receipt } from "./receipt";
@@ -22,11 +23,32 @@ export function computeFailureSignature(f: FailureInput): string {
   return createHash("sha256").update(payload).digest("hex");
 }
 
-export function lastReceiptFor(ledger: Ledger, task: string): Receipt | null {
-  const receipts = ledger
+/** Escopo estável do repo: realpath do git common dir (igual entre worktrees). */
+export function repoScope(repoRoot: string): string | undefined {
+  const r = Bun.spawnSync(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], {
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (r.exitCode !== 0) return undefined;
+  try {
+    return realpathSync(r.stdout.toString().trim());
+  } catch {
+    return undefined;
+  }
+}
+
+/** Recibos da task no escopo do repo; legados (sem `repo`) não pertencem a nenhum escopo. */
+export function scopedReceipts(ledger: Ledger, task: string, repo?: string): Receipt[] {
+  return ledger
     .all()
     .filter((r) => r.task === task)
     .map((r) => JSON.parse(r.body) as Receipt)
+    .filter((rcpt) => repo === undefined || rcpt.repo === repo);
+}
+
+export function lastReceiptFor(ledger: Ledger, task: string, repo?: string): Receipt | null {
+  const receipts = scopedReceipts(ledger, task, repo)
     .filter((rcpt) => receiptKind(rcpt) === "verify");
   if (receipts.length === 0) return null;
   return receipts[receipts.length - 1]!;

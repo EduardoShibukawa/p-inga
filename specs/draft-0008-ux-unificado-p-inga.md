@@ -3,7 +3,7 @@
 Status: approved
 
 ## Contexto
-O p-inga hoje tem três superfícies de operador (dashboard web :4242, CLI/TUIOS, docsite `gira docs`) com contratos de feedback diferentes e nenhum inventário único de defeitos de uso. O inventário `tasks/T35/evidence/inventory.md` registra 20 achados ancorados; esta spec os prioriza e define o critério de aceite verificável de cada um.
+O p-inga hoje tem três superfícies de operador (dashboard web :4242, CLI/TUIOS, docsite `gira docs`) com contratos de feedback diferentes e nenhum inventário único de defeitos de uso. O inventário `tasks/T49/evidence/inventory.md` registra 20 achados ancorados; esta spec os prioriza e define o critério de aceite verificável de cada um.
 
 ## Superfícies cobertas
 - **web/** — `web/index.html` (painel, SSE, tabelas, ações) e `web/server.ts` (`/api/*`, `/api/action/*`).
@@ -13,7 +13,7 @@ O p-inga hoje tem três superfícies de operador (dashboard web :4242, CLI/TUIOS
 
 ## Achados priorizados e critério de aceite
 Cada linha cita a âncora do inventário; o critério é o que a execução precisa provar.
-O veredito de cada achado (keep/reframe) e a âncora aberta estão em `tasks/T36/evidence/gate.md`.
+O veredito de cada achado (keep/reframe) e a âncora aberta estão em `tasks/T50/evidence/gate.md`.
 
 | ID | Sev | Achado (âncora) | Critério de aceite |
 | --- | --- | --- | --- |
@@ -44,6 +44,6 @@ O veredito de cada achado (keep/reframe) e a âncora aberta estão em `tasks/T36
 
 ## Tasks de execução propostas
 Cobertura disjunta e completa dos 20 IDs: 5 + 7 + 8.
-- **T37 — dados honestos no painel** (`tasks/T37/PLAN.md`). cobre W1, W2, W3, W4, W5. done_when: `bun test tests/ux_t37_feedback.test.ts` verde; POST em `/api/action/session` e comando inexistente devolvem erro real (sem `success: true`, sem "Em execução").
-- **T38 — render seguro e acessível** (`tasks/T38/PLAN.md`). cobre W6, W7, W8, W9, W10, W11, W12. done_when: DOM com `<h1>` único, landmarks e `aria-live`; log escapado; CORS restrito com 403 testado; caminhos por env; heartbeat SSE e contador de leituras persistido.
-- **T39 — CLI e docs acionáveis** (`tasks/T39/PLAN.md`). cobre T1, T2, T3, D1, D2, D3, D4, D5. done_when: `pinga docs eval docs` sem stack trace, comando inválido em ≤3 linhas, `pinga web` subindo :4242, nenhum `.pinga/pinga-stable` em `docs/`, I20 no anexo, modos iguais a `src/mode.ts`, README sem caminho fantasma e docsite sem link morto.
+- **T51 — dados honestos no painel** (`tasks/T51/PLAN.md`). cobre W1, W2, W3, W4, W5. done_when: `bun test tests/ux_t51_feedback.test.ts` verde; POST em `/api/action/session` e comando inexistente devolvem erro real (sem `success: true`, sem "Em execução").
+- **T52 — render seguro e acessível** (`tasks/T52/PLAN.md`). cobre W6, W7, W8, W9, W10, W11, W12. done_when: DOM com `<h1>` único, landmarks e `aria-live`; log escapado; CORS restrito com 403 testado; caminhos por env; heartbeat SSE e contador de leituras persistido.
+- **T53 — CLI e docs acionáveis** (`tasks/T53/PLAN.md`). cobre T1, T2, T3, D1, D2, D3, D4, D5. done_when: `pinga docs eval docs` sem stack trace, comando inválido em ≤3 linhas, `pinga web` subindo :4242, nenhum `.pinga/pinga-stable` em `docs/`, I20 no anexo, modos iguais a `src/mode.ts`, README sem caminho fantasma e docsite sem link morto.

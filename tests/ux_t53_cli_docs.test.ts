@@ -95,7 +95,7 @@ async function readUntil(
   return text;
 }
 
-describe("T39 · T1 docs eval recusa diretório sem stack trace", () => {
+describe("T53 · T1 docs eval recusa diretório sem stack trace", () => {
   test("diretório com markdown vira erro de uso em uma linha", () => {
     const dir = freshDir();
     writeFileSync(join(dir, "nota.md"), "# nota\n");
@@ -132,7 +132,7 @@ describe("T39 · T1 docs eval recusa diretório sem stack trace", () => {
   });
 });
 
-describe("T39 · T2 comando inválido imprime token e uso curto", () => {
+describe("T53 · T2 comando inválido imprime token e uso curto", () => {
   test("token rejeitado aparece e o USAGE inteiro não é despejado", () => {
     const r = run(["frobnicate"]);
 
@@ -161,7 +161,7 @@ describe("T39 · T2 comando inválido imprime token e uso curto", () => {
   });
 });
 
-describe("T39 · T3 pinga web sobe o painel e está no usage", () => {
+describe("T53 · T3 pinga web sobe o painel e está no usage", () => {
   test("porta padrão do painel é 4242", () => {
     expect(readDashboardConfig({}, ROOT).port).toBe(4242);
   });
@@ -216,7 +216,7 @@ describe("T39 · T3 pinga web sobe o painel e está no usage", () => {
   );
 });
 
-describe("T39 · D1 onboarding usa caminho que existe", () => {
+describe("T53 · D1 onboarding usa caminho que existe", () => {
   const docFiles = ["docs/guides/quickstart.md", "docs/concepts/ledger.md"];
 
   test("nenhum doc ativo cita o binário fantasma .pinga/pinga-stable", () => {
@@ -259,7 +259,7 @@ describe("T39 · D1 onboarding usa caminho que existe", () => {
   });
 });
 
-describe("T39 · D2 discord sai do caminho ativo", () => {
+describe("T53 · D2 discord sai do caminho ativo", () => {
   test("apêndice existe e guarda I20 e o nó do fluxo", () => {
     const appendix = join(ROOT, "docs/appendix/discord.md");
     expect(existsSync(appendix)).toBe(true);
@@ -285,7 +285,7 @@ describe("T39 · D2 discord sai do caminho ativo", () => {
   });
 });
 
-describe("T39 · D3 modos da doc vêm de src/mode.ts", () => {
+describe("T53 · D3 modos da doc vêm de src/mode.ts", () => {
   test("a linha de modos lista exatamente MODES", () => {
     const line = read("docs/concepts/invariants.md")
       .split("\n")
@@ -303,7 +303,7 @@ describe("T39 · D3 modos da doc vêm de src/mode.ts", () => {
   });
 });
 
-describe("T39 · D4 README descreve o estado atual", () => {
+describe("T53 · D4 README descreve o estado atual", () => {
   test("versão citada bate com package.json", () => {
     const pkg = JSON.parse(read("package.json")) as { version: string };
     const readme = read("README.md");
@@ -363,7 +363,7 @@ describe("T39 · D4 README descreve o estado atual", () => {
   });
 });
 
-describe("T39 · D5 checador de links internos", () => {
+describe("T53 · D5 checador de links internos", () => {
   test("todos os links internos de docs/ resolvem", () => {
     const r = run(["docs", "links"]);
 

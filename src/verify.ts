@@ -6,12 +6,16 @@ import {
   BREAKER_NEXT_ACTION,
   computeFailureSignature,
   lastReceiptFor,
+  repoScope,
+  scopedReceipts,
   shouldTrip,
 } from "./breaker";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { notifyReceipt } from "./discord";
 import { OVERFIT_EXIT, holdoutRunnerPath, runHoldout } from "./examples";
-import { changedFiles, evaluateGuards, findRedBase } from "./guards";
+import { applyBaseline, changedFiles, evaluateGuards, findRedBase } from "./guards";
+import type { DriftBaseline } from "./guards";
+import type { ClaimBaseline } from "./queue";
 import { currentBranch, parseOverride, resolveMode } from "./mode";
 import type { ModeDecision } from "./mode";
 import { parsePlan } from "./plan";
@@ -33,6 +37,9 @@ function authorFromEnv(): { model: string | null; family: string | null } {
 
 export type VerifyOptions = {
   base?: string;
+  noBaseline?: boolean;
+  requireDelta?: boolean;
+  allowNoDelta?: boolean;
   usageFile?: string;
   overrideMode?: string;
   reason?: string;
@@ -110,11 +117,12 @@ export function verifyPlan(
   }
 
   const ledger = openLedger(ledgerPathArg ?? defaultLedgerPath());
+  const repo = repoScope(repoRoot);
 
   try {
     const attempt =
       attemptArg ??
-      1 + ledger.all().filter((row) => row.task === task).length;
+      1 + scopedReceipts(ledger, task, repo).length;
 
     const parsed = parsePlan(readFileSync(resolvedPlanPath, "utf8"));
 
@@ -125,6 +133,7 @@ export function verifyPlan(
         type: "task.receipt",
         id: randomUUID(),
         task,
+        ...(repo !== undefined ? { repo } : {}),
         status: "blocked",
         reason_code: "plan_invalid",
         attempts: attempt,
@@ -147,8 +156,28 @@ export function verifyPlan(
 
     const plan = parsed.plan;
 
-    const baseSha = resolvedBase ?? findRedBase(repoRoot, task);
-    const changed = baseSha !== null ? changedFiles(repoRoot, baseSha) : [];
+    // Baseline do claim (escrito por `queue --claim`): o drift desta tentativa é
+    // o que mudou desde o HEAD do claim, descontando o que já estava sujo e
+    // permanece idêntico. `--base` explícito e `--no-baseline` vencem.
+    const baselineFile = join(repoRoot, "tasks", task, ".baseline.json");
+    let claimBaseline: ClaimBaseline | null = null;
+    if (!opts?.noBaseline && existsSync(baselineFile)) {
+      try {
+        const parsedBaseline = JSON.parse(
+          readFileSync(baselineFile, "utf8"),
+        ) as ClaimBaseline;
+        if (parsedBaseline.v === 1) claimBaseline = parsedBaseline;
+      } catch {
+        // baseline ilegível não afrouxa nada: segue o drift completo
+      }
+    }
+
+    const baseSha =
+      resolvedBase ?? claimBaseline?.head ?? findRedBase(repoRoot, task);
+    let changed = baseSha !== null ? changedFiles(repoRoot, baseSha) : [];
+    if (claimBaseline !== null) {
+      changed = applyBaseline(repoRoot, changed, claimBaseline.dirty);
+    }
 
     // Decisão de modo: todo recibo gerado a partir daqui carrega os campos.
     const decision: ModeDecision = resolveMode({
@@ -172,18 +201,23 @@ export function verifyPlan(
         touch: plan.touch,
         tests_frozen: plan.tests_frozen,
         changed,
+        requireDelta: opts?.requireDelta === true,
+        allowNoDelta: opts?.allowNoDelta === true,
       });
       if (!guardRes.ok) {
         const summary =
           guardRes.reason_code === "tests_frozen_changed"
             ? `${task} blocked: tests_frozen alterado (${guardRes.files.join(", ")})`
-            : `${task} blocked: fora do touch (${guardRes.files.join(", ")})`;
+            : guardRes.reason_code === "delta_no_touch"
+              ? `${task} blocked: nenhum arquivo do touch mudou; o contrato já passa no base — supersede a task em vez de selar pass`
+              : `${task} blocked: fora do touch (${guardRes.files.join(", ")})`;
         const tf = tokenFieldsFromOptions(opts);
         const receipt: Receipt = {
           v: 1,
           type: "task.receipt",
           id: randomUUID(),
           task,
+          ...(repo !== undefined ? { repo } : {}),
           status: "blocked",
           reason_code: guardRes.reason_code,
           attempts: attempt,
@@ -194,6 +228,9 @@ export function verifyPlan(
           author: authorFromEnv(),
           verified_by: null,
           ...modeFields,
+          ...(guardRes.reason_code === "delta_no_touch"
+            ? { next_action: `pinga supersede ${task} --reason TEXTO` }
+            : {}),
           summary: summary.slice(0, 280),
           created_at: new Date().toISOString(),
         };
@@ -240,6 +277,7 @@ export function verifyPlan(
             type: "task.receipt",
             id: randomUUID(),
             task,
+            ...(repo !== undefined ? { repo } : {}),
             status: blockStatus,
             reason_code: blockReason,
             attempts: attempt,
@@ -340,7 +378,7 @@ export function verifyPlan(
             out_sha256: hRun.artifact.sha256,
             reason_code: "overfit_holdout",
           });
-          const prev = lastReceiptFor(ledger, task);
+          const prev = lastReceiptFor(ledger, task, repo);
           if (shouldTrip(prev, sig)) {
             status = "blocked";
             reason_code = "breaker_same_failure";
@@ -371,7 +409,7 @@ export function verifyPlan(
         reason_code: "command_failed",
       });
       // Lê o último recibo da task ANTES de gravar o atual.
-      const prev = lastReceiptFor(ledger, task);
+      const prev = lastReceiptFor(ledger, task, repo);
 
       if (shouldTrip(prev, sig)) {
         status = "blocked";
@@ -400,6 +438,7 @@ export function verifyPlan(
       type: "task.receipt",
       id: randomUUID(),
       task,
+      ...(repo !== undefined ? { repo } : {}),
       status,
       reason_code,
       attempts: attempt,

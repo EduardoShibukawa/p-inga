@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
 const SPEC = join(ROOT, "specs/draft-0008-ux-unificado-p-inga.md");
-const GATE = join(ROOT, "tasks/T36/evidence/gate.md");
+const GATE = join(ROOT, "tasks/T50/evidence/gate.md");
 const VERDICT = "(keep|drop|merge|reframe)";
 const read = (p: string) => readFileSync(p, "utf8");
 
@@ -15,7 +15,7 @@ const ids = (): string[] => [
 function execPlans() {
   const dir = join(ROOT, "tasks");
   return readdirSync(dir)
-    .filter((d) => /^T(3[7-9]|4\d)$/.test(d))
+    .filter((d) => /^T5[1-3]$/.test(d))
     .map((d) => join(dir, d, "PLAN.md"))
     .filter((p) => existsSync(p))
     .map((p) => ({ path: p, txt: read(p) }));
@@ -29,7 +29,7 @@ function cobre(txt: string): string[] {
     .filter(Boolean);
 }
 
-describe("T36 · gate adversarial da spec 0008", () => {
+describe("T50 · gate adversarial da spec 0008", () => {
   test("spec aprovada e todo achado com veredito no gate.md", () => {
     expect(read(SPEC)).toMatch(/^Status: approved$/m);
     const gate = read(GATE);

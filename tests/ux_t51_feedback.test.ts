@@ -62,7 +62,7 @@ function emptyCatches(src: string): string[] {
   return found;
 }
 
-describe("T37 · W1 falha de fetch é visível (status + corpo)", () => {
+describe("T51 · W1 falha de fetch é visível (status + corpo)", () => {
   test("POST inválido em /api/action/verify responde 500 com mensagem legível", async () => {
     const { base } = await startPanel();
     const res = await fetch(`${base}/api/action/verify`, {
@@ -88,7 +88,7 @@ describe("T37 · W1 falha de fetch é visível (status + corpo)", () => {
   });
 });
 
-describe("T37 · W2 rota stub responde 501 e some do painel", () => {
+describe("T51 · W2 rota stub responde 501 e some do painel", () => {
   test("/api/action/session devolve 501 explícito", async () => {
     const { base } = await startPanel();
     const res = await fetch(`${base}/api/action/session`, {
@@ -107,7 +107,7 @@ describe("T37 · W2 rota stub responde 501 e some do painel", () => {
   });
 });
 
-describe("T37 · W3 dispatch sem opencode é simulação declarada", () => {
+describe("T51 · W3 dispatch sem opencode é simulação declarada", () => {
   test("dispatch sem binário devolve simulated=true e nunca 'Em execução'", async () => {
     const { base } = await startPanel({ OPENCODE_BIN: join(tmpdir(), "nao-existe-opencode") });
     const res = await fetch(`${base}/api/action/dispatch`, {
@@ -127,7 +127,7 @@ describe("T37 · W3 dispatch sem opencode é simulação declarada", () => {
   });
 });
 
-describe("T37 · W4 nenhum erro é engolido", () => {
+describe("T51 · W4 nenhum erro é engolido", () => {
   test("web/server.ts não tem catch vazio", () => {
     expect(emptyCatches(SERVER_SRC)).toEqual([]);
   });
@@ -139,7 +139,7 @@ describe("T37 · W4 nenhum erro é engolido", () => {
   });
 });
 
-describe("T37 · W5 ledger ausente é estado explícito", () => {
+describe("T51 · W5 ledger ausente é estado explícito", () => {
   test("/api/receipts informa ausência com caminho e comando de correção", async () => {
     const { base, root } = await startPanel();
     const res = await fetch(`${base}/api/receipts`);

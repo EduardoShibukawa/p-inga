@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
-const INVENTORY = "tasks/T35/evidence/inventory.md";
+const INVENTORY = "tasks/T49/evidence/inventory.md";
 const SPEC = "specs/draft-0008-ux-unificado-p-inga.md";
 
 function ler(rel: string): string {
@@ -18,7 +18,7 @@ function citacoes(texto: string): { arquivo: string; linha: number }[] {
   );
 }
 
-describe("T35 · UX do p-inga", () => {
+describe("T49 · UX do p-inga", () => {
   it("ancora cada achado em arquivo:linha existente", () => {
     const achados = citacoes(ler(INVENTORY));
     expect(achados.length).toBeGreaterThanOrEqual(6);
@@ -34,7 +34,7 @@ describe("T35 · UX do p-inga", () => {
     for (const superficie of ["web/", "tuios", "docs/"]) expect(inv).toContain(superficie);
   });
 
-  // Emenda 2026-10-26: a clausula original exigia `Status: draft`. O gate T36 tem por
+  // Emenda 2026-10-26: a clausula original exigia `Status: draft`. O gate T50 tem por
   // contrato promover draft->approved, entao um validador congelado exigindo draft proibe a
   // transicao que a task seguinte deve executar. Emenda aceita apenas o token de ciclo de vida;
   // as checagens substantivas (ancoragem, superficies, aceite por achado, Discord fora) ficam.

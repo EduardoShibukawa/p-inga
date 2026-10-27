@@ -8,3 +8,6 @@ runs/
 .gira/
 node_modules/
 build/
+# artefatos de fila (lease/baseline por task)
+tasks/*/.lease
+tasks/*/.baseline.json

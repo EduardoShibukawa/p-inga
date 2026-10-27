@@ -19,6 +19,7 @@ import type { Plan } from "./plan";
 import type { Evidence, ReasonCode, Receipt, Status } from "./receipt";
 import { receiptKind } from "./receipt";
 import { NOT_RUN_TOKENS } from "./tokens";
+import { repoScope, scopedReceipts } from "./breaker";
 
 /**
  * O git exporta variáveis de contexto de repositorio para os hooks (ex.:
@@ -65,14 +66,47 @@ export const WORKTREE_PREFIX = "pinga-prove-";
 
 export type ProofVerdict = "proved" | "test_passed_on_base" | "inconclusive";
 
+/** Saída típica de falha de resolução/compilação (bun, TS, Go). */
+const RESOLUTION_FAILURE = [
+  /Cannot find module/i,
+  /Module not found/i,
+  /Cannot find name '/,
+  /error TS2(304|305|307|552|724)\b/,
+  /(^|\s)undefined: \w/m,
+  /no required module provides package/,
+  /cannot find package/,
+  /\[build failed\]/,
+  /\[setup failed\]/,
+];
+/** Marcadores de falha de asserção: se presentes, o RED é real. */
+const ASSERTION_FAILURE = [
+  /expect\(/,
+  /^\s*Expected:/m,
+  /^\s*Received:/m,
+  /AssertionError/,
+  /^--- FAIL: /m,
+];
+export const WEAK_RED_DETAIL = "RED por erro de import/compilação, não por asserção";
+
+export function isResolutionFailure(output: string): boolean {
+  return (
+    RESOLUTION_FAILURE.some((re) => re.test(output)) &&
+    !ASSERTION_FAILURE.some((re) => re.test(output))
+  );
+}
+
 export function classifyBaseRun(r: {
   exit: number | null;
   timedOut: boolean;
+  output?: string;
 }): ProofVerdict {
   if (r.timedOut || r.exit === null || r.exit === 126 || r.exit === 127) {
     return "inconclusive";
   }
   if (r.exit === 0) return "test_passed_on_base";
+  if (r.output !== undefined && isResolutionFailure(r.output)) {
+    return "inconclusive";
+  }
   return "proved";
 }
 
@@ -291,10 +325,14 @@ export function proveBase(
         artifact_ref: { path: artifactRel, sha256: sha256hex(outBuffer) },
       },
     ];
+    const outText = outBuffer.toString("utf8");
     const dwVerdict = classifyBaseRun({
       exit: timedOut ? null : res.exitCode,
       timedOut,
+      output: outText,
     });
+    const weakRed =
+      !timedOut && res.exitCode !== 0 && isResolutionFailure(outText);
 
     const hRun = runHoldout(repoRoot, task, `prove-${n}`, timeoutMs, {
       cwd: wtPath,
@@ -312,7 +350,11 @@ export function proveBase(
     }
 
     const comb = combineProof(dwVerdict, hoVerdict);
-    const detail = timedOut ? "timeout" : `exit ${evidence[0].exit}`;
+    const detail = timedOut
+      ? "timeout"
+      : weakRed && comb.which === "done_when"
+        ? `${WEAK_RED_DETAIL}; exit ${evidence[0].exit}`
+        : `exit ${evidence[0].exit}`;
     return {
       verdict: comb.verdict,
       which: comb.which,
@@ -362,16 +404,13 @@ export function provePlan(
   }
 
   const ledger = openLedger(opts?.ledgerPath ?? defaultLedgerPath());
+  const repo = repoScope(repoRoot);
   try {
     const n =
       1 +
-      ledger
-        .all()
-        .filter(
-          (r) =>
-            r.task === task &&
-            receiptKind(JSON.parse(r.body) as Receipt) === "prove_red",
-        ).length;
+      scopedReceipts(ledger, task, repo).filter(
+        (r) => receiptKind(r) === "prove_red",
+      ).length;
 
     const timeoutMs = process.env.PINGA_TIMEOUT_MS
       ? Number(process.env.PINGA_TIMEOUT_MS)
@@ -423,6 +462,7 @@ export function provePlan(
       type: "task.receipt",
       id: randomUUID(),
       task,
+      ...(repo !== undefined ? { repo } : {}),
       status,
       reason_code,
       attempts: n,

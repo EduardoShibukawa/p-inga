@@ -10,10 +10,10 @@ touch:
   - docs/concepts/ledger.md
   - docs/concepts/invariants.md
   - docs/intro.md
-cria: [docs/appendix/discord.md, tests/ux_t39_cli_docs.test.ts]
-done_when: "bun test tests/ux_t39_cli_docs.test.ts"
+cria: [docs/appendix/discord.md, tests/ux_t53_cli_docs.test.ts]
+done_when: "bun test tests/ux_t53_cli_docs.test.ts"
 ---
-# T39 — CLI e docs acionáveis
+# T53 — CLI e docs acionáveis
 - T1: `docs eval` valida que o alvo é arquivo antes de `readFileSync`; diretório vira erro com dica, sem stack.
 - T2: comando desconhecido imprime o token + 2-3 linhas de uso, não o USAGE inteiro (`src/cli.ts:1268`).
 - T3: `pinga web` no usage e implementado (`"web"` no `package.json`), porta 4242, uma linha na doc.

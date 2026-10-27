@@ -114,7 +114,7 @@ function walk(node: FakeNode, visit: (n: FakeNode) => void) {
   for (const child of node.children) walk(child, visit);
 }
 
-describe("T38 · W6 estrutura semântica e acessível", () => {
+describe("T52 · W6 estrutura semântica e acessível", () => {
   test("exatamente um <h1> no documento", () => {
     const h1s = HTML.match(/<h1[\s>]/g) ?? [];
     expect(h1s.length).toBe(1);
@@ -149,7 +149,7 @@ describe("T38 · W6 estrutura semântica e acessível", () => {
   });
 });
 
-describe("T38 · W7 render sem injeção", () => {
+describe("T52 · W7 render sem injeção", () => {
   test("appendLog injeta <img onerror> como texto e nada executa", () => {
     const payload = `<img src=x onerror="globalThis.__pwned = true">`;
     const { body } = runAppendLog(payload);
@@ -183,7 +183,7 @@ describe("T38 · W7 render sem injeção", () => {
   });
 });
 
-describe("T38 · W8 CORS restrito à origem do painel", () => {
+describe("T52 · W8 CORS restrito à origem do painel", () => {
   test("POST de origem estranha recebe 403", async () => {
     const { base } = await startPanel();
     const res = await fetch(`${base}/api/action/log`, {
@@ -216,7 +216,7 @@ describe("T38 · W8 CORS restrito à origem do painel", () => {
   });
 });
 
-describe("T38 · W9 configuração por env, sem caminho de máquina", () => {
+describe("T52 · W9 configuração por env, sem caminho de máquina", () => {
   test("GIRA_MAP, OPENCODE_BIN e LEDGER_PATH são lidos do ambiente", () => {
     const root = freshRoot();
     const cfg = readDashboardConfig(
@@ -257,7 +257,7 @@ describe("T38 · W9 configuração por env, sem caminho de máquina", () => {
   });
 });
 
-describe("T38 · W10 estado ao vivo confiável", () => {
+describe("T52 · W10 estado ao vivo confiável", () => {
   test("SSE emite heartbeat em até 5s", async () => {
     const { base } = await startPanel();
     const controller = new AbortController();
@@ -288,7 +288,7 @@ describe("T38 · W10 estado ao vivo confiável", () => {
   });
 });
 
-describe("T38 · W11 sem alert/confirm nativos", () => {
+describe("T52 · W11 sem alert/confirm nativos", () => {
   test("index.html não usa alert() nem confirm()", () => {
     expect(HTML).not.toMatch(/(^|[^.\w])alert\s*\(/);
     expect(HTML).not.toMatch(/(^|[^.\w])confirm\s*\(/);
@@ -301,7 +301,7 @@ describe("T38 · W11 sem alert/confirm nativos", () => {
   });
 });
 
-describe("T38 · W12 contador de leituras persistido", () => {
+describe("T52 · W12 contador de leituras persistido", () => {
   test("duas leituras persistem em .pinga/readings.json e sobrevivem a restart", async () => {
     const root = freshRoot();
     const first = await startPanel({}, root);
@@ -309,7 +309,7 @@ describe("T38 · W12 contador de leituras persistido", () => {
       const res = await fetch(`${first.base}/api/action/ast-query`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: first.base },
-        body: JSON.stringify({ query: "task:T38" }),
+        body: JSON.stringify({ query: "task:T52" }),
       });
       expect(res.status).toBeLessThan(400);
     }
@@ -333,7 +333,7 @@ describe("T38 · W12 contador de leituras persistido", () => {
     await fetch(`${base}/api/action/ast-query`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: base },
-      body: JSON.stringify({ query: "task:T38" }),
+      body: JSON.stringify({ query: "task:T52" }),
     });
     const reset = await fetch(`${base}/api/action/reset-breakers`, {
       method: "POST",

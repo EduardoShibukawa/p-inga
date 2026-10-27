@@ -1,21 +1,17 @@
 ---
 mode: padrao
-cobre: [W6, W7, W8, W9, W10, W11, W12]
-goal: "Painel acessível e endurecido: render sem injeção, CORS local, zero caminho fixo de máquina e estado ao vivo confiável."
-touch:
-  - web/index.html
-  - web/server.ts
-cria: [tests/ux_t38_hardening.test.ts]
-done_when: "bun test tests/ux_t38_hardening.test.ts"
+goal: "Sincronizar o spec congelado do recibo (tests/receipt.test.ts) com o vocabulário real de REASON_CODES, depois que a T37 acrescentou delta_no_touch e superseded ao schema."
+done_when: "bun test tests/receipt.test.ts && bun test tests/guards.test.ts"
+touch: ["tests/receipt.test.ts", "tasks/T38/PLAN.md"]
 ---
+## Passos
+- [ ] RED: `bun test tests/receipt.test.ts` falha em "constants STATUSES, REASON_CODES, MAX_RECEIPT_BYTES, MAX_TEXT are exported" — a lista esperada tem 13 códigos e REASON_CODES tem 15
+- [ ] GREEN: acrescentar `delta_no_touch` e `superseded` à lista esperada (espelho 1:1 de REASON_CODES, sem afrouxar o validador)
+- [ ] GREEN: `bun test tests/receipt.test.ts` verde e contrato congelado de GUARD_EXIT (5 e 6) intacto em `tests/guards.test.ts`
 
-# T38 — Render seguro e acessível
-
-- W6: um `<h1>`, landmarks `<main>`/`<nav>`, abas `role=tab`+`aria-selected`, `aria-live=polite` no resultado.
-- W7: log e mensagens via `textContent`; teste com `<img src=x onerror=...>` prova que nada executa.
-- W8: CORS só para a origem do painel; Origin estranho recebe 403 em POST; sem `Allow-Origin: *`.
-- W9: `GIRA_MAP`/`OPENCODE_BIN`/`LEDGER_PATH` por env, default relativo e aviso quando ausente.
-- W10: heartbeat SSE a cada 5s, "última atualização há Ns" no badge e reconexão com backoff exponencial (teto 30s).
-- W11: `alert`/`confirm` trocados por toast + histórico; teste garante zero ocorrências no arquivo.
-- W12: contador de leituras persistido (`.pinga/readings.json`), sobrevive a restart.
-- Prova: asserções sobre o HTML servido (parse sem dependência nova) + HTTP real contra o servidor.
+## Justificativa
+A T37 estendeu o vocabulário em `src/receipt.ts` e a lista do spec ficou defasada; a T01 ficou bloqueada com
+`tests_frozen_changed` por causa disso. Esta fatia é manutenção do espelho, não enfraquecimento: o validador
+continua fechado (campo/reason desconhecido é erro), `STATUSES` não muda e nenhum teste de comportamento é tocado.
+O guard de teste congelado não pode ser a auto-isenção de quem implementa a mudança — por isso a alteração do
+spec entra como task própria (T38), com recibo e artefato, e só depois a T01 é reverificada contra o spec novo.

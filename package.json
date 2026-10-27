@@ -9,5 +9,9 @@
   "scripts": {
     "test": "bun test",
     "web": "bun bin/pinga.ts web"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "discord.js": "^14.27.0"
   }
 }

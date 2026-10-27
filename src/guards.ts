@@ -1,13 +1,29 @@
+import { createHash } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+export type DriftBaseline = Record<string, string | null>;
+
 export const GUARD_EXIT = {
   tests_frozen_changed: 5,
   scope_drift: 6,
 } as const;
+
+/**
+ * Exit próprio do `delta_no_touch`, fora de `GUARD_EXIT` porque aquele shape é
+ * contrato congelado (tests/guards.test.ts fixa exatamente 5 e 6).
+ */
+export const DELTA_NO_TOUCH_EXIT = 7;
 
 export type GuardInput = {
   task: string;
   touch?: string[];
   tests_frozen?: string[];
   changed: string[]; // caminhos relativos à raiz do repo
+  /** Exige trabalho real: recibo autônomo não pode sair sem delta no `touch`. */
+  requireDelta?: boolean;
+  /** Desarma `delta_no_touch` (operador declara trabalho já existente). */
+  allowNoDelta?: boolean;
 };
 export type GuardResult =
   | { ok: true }
@@ -17,7 +33,8 @@ export type GuardResult =
       files: string[];
       exit: 5;
     }
-  | { ok: false; reason_code: "scope_drift"; files: string[]; exit: 6 };
+  | { ok: false; reason_code: "scope_drift"; files: string[]; exit: 6 }
+  | { ok: false; reason_code: "delta_no_touch"; files: string[]; exit: 7 };
 
 export function alwaysAllowed(task: string): string[] {
   return [`tasks/${task}/EXEC.md`, `tasks/${task}/EVAL.md`];
@@ -79,6 +96,32 @@ export function evaluateGuards(input: GuardInput): GuardResult {
         exit: GUARD_EXIT.scope_drift,
       };
     }
+
+    // Recibo exige trabalho: nenhum arquivo do próprio `touch` mudou desde o
+    // claim => o contrato já estava satisfeito antes desta tentativa. Metadado
+    // EXEC/EVAL da própria task contam como delta (contrato de tests/guards.test.ts);
+    // teste provisório não conta. Sem nenhum arquivo declarado — nem metadado — o
+    // recibo é `delta_no_touch`: nada foi entregue nesta fatia.
+    // Só quem declara `requireDelta` (sealing autônomo, ex.: cron da fila) sofre a
+    // régua: `verify` manual continua aceitando no-op — contrato de tests/guards.test.ts.
+    if (
+      input.requireDelta === true &&
+      input.allowNoDelta !== true &&
+      input.touch.length > 0
+    ) {
+      const declared = new Set([...input.touch, ...alwaysAllowed(input.task)]);
+      const delta = input.changed.filter(
+        (f) => declared.has(f) && !isProvisionalTest(f),
+      );
+      if (delta.length === 0) {
+        return {
+          ok: false,
+          reason_code: "delta_no_touch",
+          files: [],
+          exit: DELTA_NO_TOUCH_EXIT,
+        };
+      }
+    }
   }
 
   return { ok: true };
@@ -131,6 +174,27 @@ export function changedFiles(repoRoot: string, base: string): string[] {
   }
 
   return Array.from(files).sort();
+}
+
+export function applyBaseline(
+  repoRoot: string,
+  changed: string[],
+  baseline: DriftBaseline,
+): string[] {
+  return changed.filter((rel) => {
+    if (!(rel in baseline)) return true;
+    return fileDigest(repoRoot, rel) !== baseline[rel];
+  });
+}
+
+export function fileDigest(repoRoot: string, rel: string): string | null {
+  try {
+    const abs = join(repoRoot, rel);
+    if (!statSync(abs).isFile()) return null;
+    return createHash("sha256").update(readFileSync(abs)).digest("hex");
+  } catch {
+    return null;
+  }
 }
 
 export function precommitDecision(staged: string[]): "skip" | "test" {
