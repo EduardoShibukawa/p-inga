@@ -32,9 +32,9 @@ describe("T44 hermes adapter com fonte local", () => {
     const link = join(s.shadow, ".hermes/plugins/pi-harness");
     expect(readlinkSync(link)).toBe(join(s.source, "hermes-plugin"));
     expect(existsSync(join(link, "plugin.yaml"))).toBe(true);
-    const calls = readFileSync(s.log, "utf8");
+    const calls = existsSync(s.log) ? readFileSync(s.log, "utf8") : "";
     expect(calls).not.toContain("plugins install");
-    expect(calls).toContain("plugins enable pi-harness");
+    expect(calls).not.toContain("plugins enable");
   });
 
   test("idempotente quando o symlink já aponta para o mesmo alvo", () => {
