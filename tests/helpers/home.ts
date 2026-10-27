@@ -168,6 +168,11 @@ export function runPinga(
   }
 
   const childEnv: Record<string, string> = { ...env };
+  // O filho é spawnado como "bun": sem PATH ele morre em
+  // "Executable not found in $PATH", fora do contrato de exit code do teste.
+  if (childEnv.PATH === undefined || childEnv.PATH === "") {
+    childEnv.PATH = process.env.PATH ?? "/usr/bin:/bin";
+  }
   delete childEnv.XDG_CONFIG_HOME;
   delete childEnv.XDG_DATA_HOME;
   delete childEnv.PI_CODING_AGENT_DIR;

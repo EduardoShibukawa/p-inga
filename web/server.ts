@@ -4,6 +4,14 @@ import { join, resolve } from "node:path";
 import { defaultLearnDbPath } from "../src/learn";
 import { defaultLedgerPath, openLedger } from "../src/ledger";
 import { computeWorkerScoreboard } from "../src/maestro";
+import {
+  addSseClient,
+  closeAllSseClients,
+  closeSseClient,
+  notifySse,
+  removeSseClient,
+  sseClientCount,
+} from "./sse.ts";
 
 export type DashboardConfig = {
   /** Porta TCP; 0 pede porta efêmera ao kernel. */
@@ -76,7 +84,6 @@ export function describeLedger(cfg: DashboardConfig): {
 }
 
 export function createDashboardServer(cfg: DashboardConfig): DashboardPanel {
-  const sseClients = new Set<ReadableStreamDefaultController>();
   const timers: Array<ReturnType<typeof setInterval>> = [];
   // Contador em memória do guardrail G1 (Inércia).
   let consecutiveReadsCount = 0;
@@ -92,18 +99,6 @@ export function createDashboardServer(cfg: DashboardConfig): DashboardPanel {
     } catch (err) {
       console.error(`[p-inga web] ledger ilegível em ${path}: ${errText(err)}`);
       return null;
-    }
-  }
-
-  function notifySse(event: string, data: unknown) {
-    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    for (const client of sseClients) {
-      try {
-        client.enqueue(new TextEncoder().encode(payload));
-      } catch (err) {
-        console.error(`[p-inga web] cliente SSE descartado: ${errText(err)}`);
-        sseClients.delete(client);
-      }
     }
   }
 
@@ -247,7 +242,8 @@ export function createDashboardServer(cfg: DashboardConfig): DashboardPanel {
       if (url.pathname === "/api/events") {
         const stream = new ReadableStream({
           start(controller) {
-            sseClients.add(controller);
+            addSseClient(controller);
+            console.error(`[p-inga web] SSE: ${sseClientCount()} cliente(s) inscrito(s)`);
             const heartbeat = setInterval(() => {
               try {
                 controller.enqueue(
@@ -258,6 +254,7 @@ export function createDashboardServer(cfg: DashboardConfig): DashboardPanel {
               } catch (err) {
                 clearInterval(heartbeat);
                 heartbeatTimers.delete(controller);
+                closeSseClient(controller);
                 console.error(`[p-inga web] heartbeat SSE encerrado: ${errText(err)}`);
               }
             }, 2000);
@@ -271,7 +268,7 @@ export function createDashboardServer(cfg: DashboardConfig): DashboardPanel {
             controller.enqueue(new TextEncoder().encode(welcome));
           },
           cancel(controller) {
-            sseClients.delete(controller);
+            removeSseClient(controller);
             const heartbeat = heartbeatTimers.get(controller);
             if (heartbeat) clearInterval(heartbeat);
             heartbeatTimers.delete(controller);
@@ -1020,14 +1017,7 @@ export function createDashboardServer(cfg: DashboardConfig): DashboardPanel {
     if (stopped) return;
     stopped = true;
     for (const timer of timers) clearInterval(timer);
-    for (const client of sseClients) {
-      try {
-        client.close();
-      } catch (err) {
-        console.error(`[p-inga web] falha ao fechar cliente SSE: ${errText(err)}`);
-      }
-    }
-    sseClients.clear();
+    closeAllSseClients();
     server.stop(true);
   };
 
