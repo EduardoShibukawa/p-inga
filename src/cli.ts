@@ -25,9 +25,25 @@ import {
 import { compactContext } from "./compact";
 import { evaluateDocument, renderScorecardMarkdown } from "./docs_eval";
 import { notifyDigest, sendDiscordMessage } from "./discord";
+import {
+  canClaim,
+  claim,
+  formatQueueDigest,
+  nextTask,
+  NOTIFY_STATES,
+  readSnapshot,
+  release,
+  scanQueue,
+  transitions,
+  writeSnapshot,
+} from "./queue";
+import { supersedeTask } from "./supersede";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
-       pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base]
+       pinga queue [--json] [--notify] [--root DIR] [--ledger PATH] [--claim [TASK] [--ttl S]] [--release TASK]
+                   [--probe TASK | --probe-all] [--probe-timeout S]
+       pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base] [--no-baseline] [--require-delta] [--allow-no-delta]
+       pinga supersede <TASK> --reason TEXTO [--ledger PATH] [--timeout S]
        pinga prove-red <PLAN.md> [--ledger PATH] [--base SHA]
        pinga mode <PLAN.md> [--base SHA] [--override-mode M --reason TEXTO]
        pinga judge <PLAN.md> [--ledger PATH] [--judge-model M] [--endpoint URL] [--base SHA] [--usage-file PATH]
@@ -173,6 +189,129 @@ async function learnIngestMulti(opts: {
 export async function runCli(argv: string[]): Promise<number> {
   const [command, subcommand, ...rest] = argv;
 
+  if (command === "queue") {
+    const args = [subcommand, ...rest].filter((a): a is string => typeof a === "string");
+    const has = (flag: string): boolean => args.includes(flag);
+    const valueOf = (flag: string): string | undefined => {
+      const idx = args.indexOf(flag);
+      if (idx === -1) return undefined;
+      const value = args[idx + 1];
+      return value === undefined || value.startsWith("--") ? undefined : value;
+    };
+
+    const root = valueOf("--root") ?? process.cwd();
+    const ledgerPath = valueOf("--ledger");
+    const json = has("--json");
+
+    const probeAll = has("--probe-all");
+    const probeTask = valueOf("--probe");
+    if (has("--probe") && probeTask === undefined) {
+      console.error("queue: --probe exige TASK (use --probe-all para varrer todas)");
+      return 2;
+    }
+    const probeEnabled = probeAll || probeTask !== undefined;
+    const probeTimeoutRaw = valueOf("--probe-timeout");
+    const probeTimeoutMs =
+      probeTimeoutRaw === undefined ? undefined : Number(probeTimeoutRaw) * 1000;
+    if (
+      probeTimeoutMs !== undefined &&
+      (!Number.isFinite(probeTimeoutMs) || probeTimeoutMs <= 0)
+    ) {
+      console.error("queue: --probe-timeout exige segundos > 0");
+      return 2;
+    }
+    const scanOpts = {
+      root,
+      ledgerPath,
+      probe: probeEnabled,
+      probeTask: probeAll ? undefined : probeTask,
+      probeTimeoutMs,
+    };
+
+    if (has("--release")) {
+      const task = valueOf("--release");
+      if (task === undefined) {
+        console.error(USAGE);
+        return 2;
+      }
+      const res = release(root, task);
+      if (json) console.log(JSON.stringify({ released: task, ok: res.ok }));
+      else console.log(res.ok ? `released ${task}` : `sem lease em ${task}`);
+      return 0;
+    }
+
+    if (has("--claim")) {
+      const ttlRaw = valueOf("--ttl");
+      const ttl = ttlRaw === undefined ? undefined : Number(ttlRaw);
+      if (ttl !== undefined && (!Number.isFinite(ttl) || ttl <= 0)) {
+        console.error(USAGE);
+        return 2;
+      }
+      const report = scanQueue(scanOpts);
+      // --claim TASK força uma task específica (iteração em bloqueio/retomada);
+      // --claim sozinho pega a próxima da fila.
+      const forced = valueOf("--claim");
+      const forcedTask = forced?.trim().toUpperCase();
+      const chosen =
+        forcedTask === undefined || forcedTask === ""
+          ? nextTask(report.tasks)
+          : (report.tasks.find((t) => t.task === forcedTask) ?? null);
+      if (chosen === null) {
+        if (json) console.log(JSON.stringify({ claimed: null, counts: report.counts }));
+        else console.log("none");
+        return 0;
+      }
+      if (!canClaim(chosen.state)) {
+        if (json) {
+          console.log(
+            JSON.stringify({ claimed: null, state: chosen.state, counts: report.counts }),
+          );
+        } else {
+          console.error(`claim: ${chosen.task} está ${chosen.state} — nada a executar`);
+        }
+        return 1;
+      }
+      const res = claim(root, chosen.task, ttl);
+      if (!res.ok) {
+        console.error(`claim: ${res.reason ?? "falhou"}`);
+        return 1;
+      }
+      if (json) {
+        console.log(
+          JSON.stringify({
+            claimed: chosen.task,
+            state: chosen.state,
+            plan: chosen.plan_path,
+            counts: report.counts,
+          }),
+        );
+      } else {
+        console.log(chosen.task);
+      }
+      return 0;
+    }
+
+    const previous = readSnapshot(root);
+    const report = scanQueue(scanOpts);
+    const changes = transitions(previous, report);
+    writeSnapshot(root, report);
+
+    if (json) {
+      console.log(JSON.stringify({ ...report, transitions: changes }, null, 2));
+    } else {
+      console.log(formatQueueDigest(report, changes));
+    }
+
+    if (has("--notify") && changes.some((t) => NOTIFY_STATES.includes(t.to))) {
+      const sent = await notifyDigest(formatQueueDigest(report, changes));
+      if (!sent) {
+        console.error("notify: falha ao enviar digest para o Discord");
+        return 1;
+      }
+    }
+    return 0;
+  }
+
   if (command === "ledger" && subcommand === "verify") {
     let ledgerPath = defaultLedgerPath();
     const flagIndex = rest.indexOf("--ledger");
@@ -213,10 +352,19 @@ export async function runCli(argv: string[]): Promise<number> {
     let overrideMode: string | undefined;
     let reason: string | undefined;
     let proveBase = false;
+    let noBaseline = false;
+    let requireDelta = false;
+    let allowNoDelta = false;
 
     for (let i = 0; i < rest.length; i++) {
       const arg = rest[i];
-      if (arg === "--ledger") {
+      if (arg === "--no-baseline") {
+        noBaseline = true;
+      } else if (arg === "--require-delta") {
+        requireDelta = true;
+      } else if (arg === "--allow-no-delta") {
+        allowNoDelta = true;
+      } else if (arg === "--ledger") {
         const value = rest[i + 1];
         if (value === undefined || value === "") {
           console.error(USAGE);
@@ -279,6 +427,64 @@ export async function runCli(argv: string[]): Promise<number> {
       overrideMode,
       reason,
       proveBase,
+      noBaseline,
+      requireDelta,
+      allowNoDelta,
+    });
+  }
+
+  if (command === "supersede") {
+    const taskArg = subcommand;
+    if (
+      taskArg === undefined ||
+      taskArg === "" ||
+      taskArg.startsWith("--")
+    ) {
+      console.error(USAGE);
+      return 2;
+    }
+    const planPath = `tasks/${taskArg.trim().toUpperCase()}/PLAN.md`;
+    let reason: string | undefined;
+    let ledgerPath: string | undefined;
+    let timeoutMs: number | undefined;
+
+    for (let i = 0; i < rest.length; i++) {
+      const arg = rest[i];
+      if (arg === "--reason") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "") {
+          console.error(USAGE);
+          return 2;
+        }
+        reason = value;
+        i++;
+      } else if (arg === "--ledger") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "") {
+          console.error(USAGE);
+          return 2;
+        }
+        ledgerPath = value;
+        i++;
+      } else if (arg === "--timeout") {
+        const value = rest[i + 1];
+        const seconds = Number(value);
+        if (value === undefined || !Number.isFinite(seconds) || seconds <= 0) {
+          console.error("supersede: --timeout exige segundos > 0");
+          return 2;
+        }
+        timeoutMs = Math.round(seconds * 1000);
+        i++;
+      } else {
+        console.error(USAGE);
+        return 2;
+      }
+    }
+
+    return supersedeTask(planPath, {
+      reason: reason ?? "",
+      ledgerPath,
+      timeoutMs,
     });
   }
 
