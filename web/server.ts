@@ -25,19 +25,8 @@ function openReadOnlyDb(path: string): Database | null {
 // In-memory tracking for Guardrail G1 (Inertia read counter)
 let consecutiveReadsCount = 0;
 
-// SSE Client management
-const sseClients = new Set<ReadableStreamDefaultController>();
-
-export function notifySse(event: string, data: any) {
-  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const client of sseClients) {
-    try {
-      client.enqueue(new TextEncoder().encode(payload));
-    } catch {
-      sseClients.delete(client);
-    }
-  }
-}
+import { addSseClient, notifySse, removeSseClient } from "./sse";
+export { notifySse };
 
 // Watcher do ledger para envio reativo via SSE
 if (existsSync(LEDGER_PATH)) {
@@ -110,9 +99,11 @@ export const server = Bun.serve({
 
     // 1. SSE Stream
     if (url.pathname === "/api/events") {
+      let sseCtrl: ReadableStreamDefaultController | null = null;
       const stream = new ReadableStream({
         start(controller) {
-          sseClients.add(controller);
+          sseCtrl = controller;
+          addSseClient(controller);
           // Initial greeting log
           const welcome = `event: log\ndata: ${JSON.stringify({
             source: "system",
@@ -122,8 +113,9 @@ export const server = Bun.serve({
           })}\n\n`;
           controller.enqueue(new TextEncoder().encode(welcome));
         },
-        cancel(controller) {
-          sseClients.delete(controller);
+        cancel() {
+          // cancel recebe o reason, não o controller
+          if (sseCtrl) removeSseClient(sseCtrl);
         },
       });
       return new Response(stream, {
