@@ -15,6 +15,8 @@ export const REASON_CODES = [
   "model_unattested",
   "overfit_holdout",
   "test_passed_on_base",
+  "delta_no_touch",
+  "superseded",
 ] as const;
 export const MAX_RECEIPT_BYTES = 4096;
 export const MAX_TEXT = 280;
