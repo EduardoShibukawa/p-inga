@@ -212,6 +212,11 @@ export function makeHarnessHome(): FakeEnv & { bin: string; log: string } {
     writeFileSync(skillFile, `---\nname: ${s}\n---\n`);
   }
 
+  // Fonte local: o adapter hermes linka <source>/hermes-plugin (T44).
+  const hermesPlugin = join(base.source, "hermes-plugin/plugin.yaml");
+  mkdirSync(dirname(hermesPlugin), { recursive: true });
+  writeFileSync(hermesPlugin, "name: pi-harness\n");
+
   writeStubs(bin);
 
   // Garante um PATH com bin + diretórios de sistema sem harnesses reais
