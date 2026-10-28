@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { tmp } from "./helpers/home";
 import {
   formatReceiptDiscordEmbed,
   resolveDiscordConfig,
@@ -11,7 +11,7 @@ import type { Receipt } from "../src/receipt";
 
 describe("T26 — Discord Notifications & Remote Observability (P-Ingá v0.7)", () => {
   it("1. resolveDiscordConfig resolves token and channel from Hermes config or fallback", () => {
-    const home = join(tmpdir(), `pinga-discord-home-${Date.now()}`);
+    const home = tmp("pinga-discord-home-");
     mkdirSync(join(home, ".hermes", "profiles", "pinga"), { recursive: true });
     writeFileSync(join(home, ".hermes", "profiles", "pinga", ".env"), "DISCORD_BOT_TOKEN=fake-token-1234567890\n");
     writeFileSync(join(home, ".hermes", "profiles", "pinga", "config.yaml"), "chat_id: '1563272747591803110'\n");
