@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmp } from "./helpers/home";
 import { createDashboardServer, readDashboardConfig } from "../web/server";
 
 const ROOT = join(import.meta.dir, "..");
@@ -17,7 +17,7 @@ afterAll(() => {
 });
 
 function freshRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "pinga-t38-"));
+  const root = tmp("pinga-t38-");
   roots.push(root);
   return root;
 }
@@ -26,6 +26,8 @@ async function startPanel(env: Record<string, string> = {}, root = freshRoot()) 
   const baseEnv = {
     ...process.env,
     PATH: process.env.PATH ?? "",
+    HOME: root,
+    XDG_STATE_HOME: join(root, ".state"),
     PINGA_ROOT: root,
     PINGA_WEB_PORT: "0",
     PINGA_HTML_FILE: join(ROOT, "web/index.html"),
