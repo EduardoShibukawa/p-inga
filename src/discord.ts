@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 function home(): string {
-  return process.env.HOME && process.env.HOME.trim() ? process.env.HOME.trim() : homedir();
+  return process.env.HOME && process.env.HOME !== "" ? process.env.HOME : homedir();
 }
 import type { Receipt } from "./receipt";
 
