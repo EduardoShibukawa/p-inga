@@ -60,3 +60,31 @@ export function emitReceiptEvent(receipt: Receipt, result: AppendResult): void {
     closeSync(fd);
   }
 }
+
+/**
+ * A4 (PLAN-0010 TASK-06): aviso acionável do pinga em $GINGA_EVENTS
+ * (envelope v1, kind `blocker`). O Ginga é quem roteia para o Discord;
+ * sem $GINGA_EVENTS nada acontece e o chamador usa o fallback antigo.
+ */
+export function emitNoticeEvent(message: string): void {
+  const path = process.env.GINGA_EVENTS;
+  if (path === undefined || path === "") return;
+
+  const ev = {
+    v: 1,
+    source: "pinga",
+    kind: "blocker",
+    id: ulid(),
+    ts: new Date().toISOString(),
+    data: { blocker_id: ulid(), question: message, raised_by: "pinga" },
+  };
+
+  const line = `${JSON.stringify(ev)}\n`;
+  mkdirSync(dirname(path), { recursive: true });
+  const fd = openSync(path, "a");
+  try {
+    writeSync(fd, line);
+  } finally {
+    closeSync(fd);
+  }
+}
