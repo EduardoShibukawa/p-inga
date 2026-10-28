@@ -26,6 +26,8 @@ async function startPanel(env: Record<string, string> = {}, root = freshRoot()) 
   const baseEnv = {
     ...process.env,
     PATH: process.env.PATH ?? "",
+    HOME: root,
+    XDG_STATE_HOME: join(root, ".state"),
     PINGA_ROOT: root,
     PINGA_WEB_PORT: "0",
     PINGA_HTML_FILE: join(ROOT, "web/index.html"),

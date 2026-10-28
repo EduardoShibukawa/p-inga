@@ -1,6 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+function home(): string {
+  return process.env.HOME && process.env.HOME.trim() ? process.env.HOME.trim() : home();
+}
 import type { Receipt } from "./receipt";
 
 export interface DiscordConfig {
@@ -16,7 +20,7 @@ export function resolveDiscordConfig(): DiscordConfig | null {
   let channelId = process.env.DISCORD_CHANNEL_ID;
 
   // Check ~/.hermes/profiles/pinga/.env
-  const pingaEnvPath = join(homedir(), ".hermes", "profiles", "pinga", ".env");
+  const pingaEnvPath = join(home(), ".hermes", "profiles", "pinga", ".env");
   if (!token && existsSync(pingaEnvPath)) {
     try {
       const content = readFileSync(pingaEnvPath, "utf8");
@@ -28,7 +32,7 @@ export function resolveDiscordConfig(): DiscordConfig | null {
   }
 
   // Check ~/.hermes/.env
-  const hermesEnvPath = join(homedir(), ".hermes", ".env");
+  const hermesEnvPath = join(home(), ".hermes", ".env");
   if (!token && existsSync(hermesEnvPath)) {
     try {
       const content = readFileSync(hermesEnvPath, "utf8");
@@ -41,7 +45,7 @@ export function resolveDiscordConfig(): DiscordConfig | null {
 
   // Resolve channelId from ~/.hermes/profiles/pinga/config.yaml
   if (!channelId) {
-    const pingaConfigPath = join(homedir(), ".hermes", "profiles", "pinga", "config.yaml");
+    const pingaConfigPath = join(home(), ".hermes", "profiles", "pinga", "config.yaml");
     if (existsSync(pingaConfigPath)) {
       try {
         const content = readFileSync(pingaConfigPath, "utf8");
