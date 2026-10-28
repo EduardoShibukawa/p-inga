@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { WRAPPER_UNAVAILABLE_EXIT, doneWhenArgv, wrapperProblem } from "./exec";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { parsePlan } from "./plan";
+import { PROVE_EXIT } from "./prove";
 import type { Receipt } from "./receipt";
 import { taskRef } from "./task_ref";
 import { NOT_RUN_TOKENS } from "./tokens";
@@ -48,6 +50,14 @@ export function supersedeTask(
   planPath: string,
   opts: SupersedeOptions,
 ): number {
+  // T72: fail-closed como verify (src/verify.ts) — o done_when nunca executa
+  // sem o sandbox quando ele foi pedido.
+  const wrapErr = wrapperProblem();
+  if (wrapErr !== null) {
+    console.error(`supersede: ${wrapErr}; nada rodou`);
+    return SUPERSEDE_EXIT.command_failed;
+  }
+
   const reason = (opts.reason ?? "").trim();
   if (reason.length === 0) {
     console.error("supersede: --reason é obrigatório (por que não há trabalho)");
@@ -98,7 +108,7 @@ export function supersedeTask(
   }
 
   const t0 = Date.now();
-  const res = Bun.spawnSync(["sh", "-c", plan.done_when], {
+  const res = Bun.spawnSync(doneWhenArgv(plan.done_when, repoRoot), {
     cwd: repoRoot,
     timeout: opts.timeoutMs ?? 10 * 60_000,
     stdout: "pipe",
@@ -117,6 +127,49 @@ export function supersedeTask(
 
   const exit = res.exitedDueToTimeout || res.exitCode === null ? null : res.exitCode;
   if (exit !== 0) {
+    if (exit === WRAPPER_UNAVAILABLE_EXIT) {
+      // T71: sandbox indisponível — fail-closed, o done_when nunca rodou.
+      // T73 (judge Codex rodada 2): como verify (src/verify.ts), sela recibo
+      // blocked/infra com o exit 97 e o artefato já escrito; nada do done_when
+      // é atestado. O exit do CLI continua != 0.
+      const attempt = 1 + rows.length;
+      const receipt: Receipt = {
+        v: 1,
+        type: "task.receipt",
+        id: randomUUID(),
+        task,
+        status: "blocked",
+        reason_code: "infra",
+        attempts: attempt,
+        evidence: [
+          {
+            kind: "command",
+            cmd_sha256: sha256hex(plan.done_when),
+            exit,
+            duration_ms,
+            artifact_ref: { path: artifactRel, sha256: sha256hex(out) },
+          },
+        ],
+        tokens: { ...NOT_RUN_TOKENS.tokens },
+        cost_usd: null,
+        cost_evidence: "not run: supersede não consome modelo",
+        author: { model: null, family: null },
+        verified_by: null,
+        next_action: "restaurar o sandbox (PINGA_EXEC_WRAPPER) e tentar de novo",
+        summary:
+          `${task} blocked: PINGA_EXEC_WRAPPER saiu 97 (sandbox indisponível); nada rodou fora do wrapper`.slice(
+            0,
+            280,
+          ),
+        created_at: new Date().toISOString(),
+      };
+      ledger.append(receipt);
+      console.error(
+        `supersede: PINGA_EXEC_WRAPPER saiu ${exit} (sandbox indisponível); nada rodou fora do wrapper`,
+      );
+      console.log(JSON.stringify(receipt));
+      return PROVE_EXIT.infra;
+    }
     // Mostra a última linha útil: o operador decide sem abrir o artefato.
     const hint = lastMeaningfulLine(out);
     console.error(

@@ -14,7 +14,8 @@ import { defaultLedgerPath, openLedger } from "./ledger";
 import type { Ledger } from "./ledger";
 import type { ReasonCode, Receipt, Status } from "./receipt";
 import { receiptKind } from "./receipt";
-import { resolveRepoRoot } from "./prove";
+import { WRAPPER_UNAVAILABLE_EXIT, doneWhenArgv, wrapperProblem } from "./exec";
+import { PROVE_EXIT, resolveRepoRoot } from "./prove";
 import { taskRef } from "./task_ref";
 import { resolveUsageFile, tokenFieldsFor } from "./tokens";
 
@@ -182,6 +183,14 @@ export function verifyPlanDoc(
   attemptArg?: number,
   opts: PlanVerifyOptions = {},
 ): number {
+  // T72: fail-closed como verify (src/verify.ts) — nada é selado nem executado
+  // com o wrapper inutilizável.
+  const wrapErr = wrapperProblem();
+  if (wrapErr !== null) {
+    console.error(`verify --plan: ${wrapErr}; nada rodou`);
+    return PROVE_EXIT.infra;
+  }
+
   const resolved = resolve(planPath);
   if (!existsSync(resolved)) {
     console.error(`Erro: arquivo de plano não encontrado em ${resolved}`);
@@ -256,7 +265,7 @@ export function verifyPlanDoc(
       : DEFAULT_TIMEOUT_MS;
 
     const t0 = Date.now();
-    const res = Bun.spawnSync(["sh", "-c", doc.done_when], {
+    const res = Bun.spawnSync(doneWhenArgv(doc.done_when, repoRoot), {
       cwd: repoRoot,
       timeout: timeoutMs,
       stdout: "pipe",
@@ -285,6 +294,20 @@ export function verifyPlanDoc(
       },
     ];
     const segundos = Math.round(duration_ms / 1000);
+
+    // T71: wrapper saiu 97 — sandbox indisponível, o done_when não rodou;
+    // recibo não atesta pass nem fail.
+    if (res.exitCode === WRAPPER_UNAVAILABLE_EXIT) {
+      seal(
+        ledger,
+        common,
+        "blocked",
+        "infra",
+        evidence,
+        `${planRef} blocked: PINGA_EXEC_WRAPPER saiu 97 (sandbox indisponível); nada rodou fora do wrapper`,
+      );
+      return PROVE_EXIT.infra;
+    }
 
     if (res.exitedDueToTimeout || res.exitCode === null) {
       seal(

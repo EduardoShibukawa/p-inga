@@ -12,6 +12,7 @@ import {
 } from "./breaker";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { notifyReceipt } from "./discord";
+import { WRAPPER_UNAVAILABLE_EXIT, doneWhenArgv, wrapperProblem } from "./exec";
 import { OVERFIT_EXIT, holdoutRunnerPath, runHoldout } from "./examples";
 import { applyBaseline, changedFiles, evaluateGuards, findRedBase } from "./guards";
 import type { DriftBaseline } from "./guards";
@@ -105,6 +106,15 @@ export function verifyPlan(
     return 2;
   }
   const repoRoot = rootRes.root;
+
+  // T71: fail-closed. Com PINGA_EXEC_WRAPPER configurado e inutilizável,
+  // nada roda (nem prova no base, nem done_when) e nada é selado no ledger —
+  // sem sandbox o verifier não atesta execução de coisa alguma.
+  const wrapErr = wrapperProblem();
+  if (wrapErr !== null) {
+    console.error(`verify: ${wrapErr}; nada rodou`);
+    return PROVE_EXIT.infra;
+  }
 
   const parsedOverride = parseOverride(opts?.overrideMode, opts?.reason);
   if (!parsedOverride.ok) {
@@ -356,7 +366,7 @@ export function verifyPlan(
     }
 
     const t0 = Date.now();
-    const res = Bun.spawnSync(["sh", "-c", plan.done_when], {
+    const res = Bun.spawnSync(doneWhenArgv(plan.done_when, repoRoot), {
       cwd: repoRoot,
       timeout: timeoutMs,
       stdout: "pipe",
@@ -414,6 +424,18 @@ export function verifyPlan(
       evidenceExit = null;
       cliExit = 2;
       summary = normalSummary();
+    } else if (res.exitCode === WRAPPER_UNAVAILABLE_EXIT) {
+      // T71: o sandbox se declarou indisponível (exit 97) — o done_when
+      // não chegou a rodar; o recibo não atesta pass nem fail.
+      status = "blocked";
+      reason_code = "infra";
+      evidenceExit = res.exitCode;
+      cliExit = PROVE_EXIT.infra;
+      summary =
+        `${task} blocked: PINGA_EXEC_WRAPPER saiu 97 (sandbox indisponível); nada rodou fora do wrapper`.slice(
+          0,
+          280,
+        );
     } else if (noTestsRun) {
       status = "blocked";
       reason_code = "no_tests_run";
@@ -454,6 +476,15 @@ export function verifyPlan(
             );
         } else if (hRun.exit === 0) {
           summary = `${normalSummary()} · holdout ok`.slice(0, 280);
+        } else if (hRun.exit === WRAPPER_UNAVAILABLE_EXIT) {
+          status = "blocked";
+          reason_code = "infra";
+          cliExit = PROVE_EXIT.infra;
+          summary =
+            `${task} blocked: holdout saiu 97 (sandbox indisponível); nada atestado`.slice(
+              0,
+              280,
+            );
         } else {
           const sig = computeFailureSignature({
             exit: hRun.exit,
