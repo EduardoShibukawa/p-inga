@@ -6,6 +6,7 @@ import { attestFromEndpoint, attestFromTranscript, modelFamily } from "./family"
 import { findRedBase } from "./guards";
 import { defaultLedgerPath, openLedger, type Ledger } from "./ledger";
 import { parsePlan } from "./plan";
+import { resolveRepoRoot } from "./prove";
 import type { Attestation, Receipt, Status, ReasonCode } from "./receipt";
 import { receiptKind } from "./receipt";
 import { NOT_RUN_TOKENS, type TokenFields } from "./tokens";
@@ -25,6 +26,8 @@ export type JudgeOptions = {
   judgeModel?: string;
   endpoint?: string;
   base?: string;
+  /** T65: raiz do repo-alvo quando o PLAN/TASK vive fora dele. */
+  root?: string;
   usageFile?: string;
 };
 
@@ -166,13 +169,12 @@ export async function judgePlan(
   const dir = dirname(resolvedPlan);
   const task = basename(dir);
 
-  const gitRoot = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
-    cwd: dir,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const repoRoot =
-    gitRoot.exitCode === 0 ? gitRoot.stdout.toString().trim() : dir;
+  const rootRes = resolveRepoRoot(resolvedPlan, opts?.root);
+  if (!rootRes.ok) {
+    console.error(rootRes.error);
+    return 2;
+  }
+  const repoRoot = rootRes.root;
 
   // 1. Plano inválido → exit 3, sem recibo.
   let plan;

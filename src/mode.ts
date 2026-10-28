@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { canonicalJson } from "./canonical";
 import { changedFiles, findRedBase } from "./guards";
 import { parsePlan } from "./plan";
+import { taskRef } from "./task_ref";
 
 export const MODES = ["mvp", "padrao", "completo"] as const;
 export type Mode = (typeof MODES)[number];
@@ -216,7 +217,7 @@ function findRepoRoot(start: string): string | null {
 }
 
 function inferTaskId(planPath: string): string {
-  return basename(dirname(resolve(planPath)));
+  return taskRef(planPath);
 }
 
 function resolveCommit(repoRoot: string, base: string): string | null {

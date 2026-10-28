@@ -2,6 +2,12 @@ export type Plan = {
   mode: "mvp" | "padrao" | "completo";
   goal: string;
   done_when: string;
+  type?: "task";
+  title?: string;
+  plan?: string;
+  repo?: string;
+  depends_on?: string[];
+  tier?: "free" | "medium" | "strong";
   touch?: string[];
   tests_frozen?: string[];
   budget?: { tokens?: number; minutes?: number };
@@ -12,6 +18,7 @@ export type PlanParseResult =
   | { ok: false; errors: string[] };
 
 const MODES = ["mvp", "padrao", "completo"] as const;
+const TIERS = ["free", "medium", "strong"] as const;
 const MAX_LINES = 25;
 const MAX_GOAL = 280;
 
@@ -87,6 +94,32 @@ export function parsePlan(text: string): PlanParseResult {
     errors.push("invalid field: done_when must be a non-empty string");
   }
 
+  if (d.type !== undefined) {
+    if (d.type === "plan") {
+      errors.push("type: plan → use pinga verify em modo PLAN");
+    } else if (d.type !== "task") {
+      errors.push("invalid field: type must be 'task'");
+    }
+  }
+
+  for (const field of ["title", "plan", "repo"] as const) {
+    if (d[field] !== undefined && typeof d[field] !== "string") {
+      errors.push(`invalid field: ${field} must be a string`);
+    }
+  }
+
+  if (d.depends_on !== undefined && !isStringArray(d.depends_on)) {
+    errors.push(
+      "invalid field: depends_on must be an array of non-empty strings",
+    );
+  }
+
+  if (d.tier !== undefined && !(TIERS as readonly string[]).includes(d.tier)) {
+    errors.push(
+      `invalid field: tier must be one of ${TIERS.join(", ")}`,
+    );
+  }
+
   if (d.touch === undefined) {
     if (d.mode === "padrao" || d.mode === "completo") {
       errors.push("missing field: touch is required in padrao/completo");
@@ -132,6 +165,14 @@ export function parsePlan(text: string): PlanParseResult {
       mode: d.mode as Plan["mode"],
       goal: d.goal as string,
       done_when: d.done_when as string,
+      ...(d.type !== undefined && { type: d.type as Plan["type"] }),
+      ...(d.title !== undefined && { title: d.title as string }),
+      ...(d.plan !== undefined && { plan: d.plan as string }),
+      ...(d.repo !== undefined && { repo: d.repo as string }),
+      ...(d.depends_on !== undefined && {
+        depends_on: d.depends_on as string[],
+      }),
+      ...(d.tier !== undefined && { tier: d.tier as Plan["tier"] }),
       ...(d.touch !== undefined && { touch: d.touch as string[] }),
       ...(d.tests_frozen !== undefined && {
         tests_frozen: d.tests_frozen as string[],

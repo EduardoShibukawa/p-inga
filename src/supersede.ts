@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { parsePlan } from "./plan";
 import type { Receipt } from "./receipt";
+import { taskRef } from "./task_ref";
 import { NOT_RUN_TOKENS } from "./tokens";
 
 const sha256hex = (data: string | Uint8Array): string =>
@@ -58,7 +59,7 @@ export function supersedeTask(
     console.error(`Erro: arquivo de plano não encontrado em ${resolvedPlanPath}`);
     return SUPERSEDE_EXIT.plan_invalid;
   }
-  const task = basename(dirname(resolvedPlanPath));
+  const task = taskRef(resolvedPlanPath);
 
   const parsed = parsePlan(readFileSync(resolvedPlanPath, "utf8"));
   if (!parsed.ok) {

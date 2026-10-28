@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import {
   BREAKER_EXIT,
   BREAKER_NEXT_ACTION,
@@ -19,7 +19,8 @@ import type { ClaimBaseline } from "./queue";
 import { currentBranch, parseOverride, resolveMode } from "./mode";
 import type { ModeDecision } from "./mode";
 import { parsePlan } from "./plan";
-import { PROVE_EXIT, proveBase } from "./prove";
+import { PROVE_EXIT, proveBase, resolveRepoRoot } from "./prove";
+import { taskRef, taskSidecarDir } from "./task_ref";
 import type { ReasonCode, Receipt, Status } from "./receipt";
 import { resolveUsageFile, tokenFieldsFor } from "./tokens";
 import type { TokenFields } from "./tokens";
@@ -68,6 +69,8 @@ export type VerifyOptions = {
   allowNoDelta?: boolean;
   /** T59: opt-in estreito — libera scope_drift só nos arquivos do verifier. */
   allowVerifierDrift?: boolean;
+  /** T65: raiz do repo-alvo quando o PLAN/TASK vive fora dele. */
+  root?: string;
   usageFile?: string;
   overrideMode?: string;
   reason?: string;
@@ -94,20 +97,14 @@ export function verifyPlan(
     console.error(`Erro: arquivo de plano não encontrado em ${resolvedPlanPath}`);
     return 3;
   }
-  const task = basename(dirname(resolvedPlanPath));
+  const task = taskRef(resolvedPlanPath);
 
-  const gitRoot = Bun.spawnSync(
-    ["git", "rev-parse", "--show-toplevel"],
-    {
-      cwd: dirname(resolvedPlanPath),
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
-  const repoRoot =
-    gitRoot.exitCode === 0
-      ? gitRoot.stdout.toString().trim()
-      : dirname(resolvedPlanPath);
+  const rootRes = resolveRepoRoot(resolvedPlanPath, opts?.root);
+  if (!rootRes.ok) {
+    console.error(rootRes.error);
+    return 2;
+  }
+  const repoRoot = rootRes.root;
 
   const parsedOverride = parseOverride(opts?.overrideMode, opts?.reason);
   if (!parsedOverride.ok) {
@@ -187,7 +184,8 @@ export function verifyPlan(
     // Baseline do claim (escrito por `queue --claim`): o drift desta tentativa é
     // o que mudou desde o HEAD do claim, descontando o que já estava sujo e
     // permanece idêntico. `--base` explícito e `--no-baseline` vencem.
-    const baselineFile = join(repoRoot, "tasks", task, ".baseline.json");
+    const sidecarAbs = taskSidecarDir(resolvedPlanPath);
+    const baselineFile = join(sidecarAbs, ".baseline.json");
     let claimBaseline: ClaimBaseline | null = null;
     if (!opts?.noBaseline && existsSync(baselineFile)) {
       try {
@@ -199,6 +197,11 @@ export function verifyPlan(
         // baseline ilegível não afrouxa nada: segue o drift completo
       }
     }
+
+    const sidecarRel = (() => {
+      const rel = relative(repoRoot, sidecarAbs);
+      return rel === "" || rel.startsWith("..") || isAbsolute(rel) ? undefined : rel;
+    })();
 
     const baseSha =
       resolvedBase ?? claimBaseline?.head ?? findRedBase(repoRoot, task);
@@ -242,6 +245,7 @@ export function verifyPlan(
     if (baseSha !== null) {
       const guardRes = evaluateGuards({
         task,
+        sidecar: sidecarRel,
         touch: plan.touch,
         tests_frozen: plan.tests_frozen,
         changed,
