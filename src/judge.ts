@@ -300,8 +300,8 @@ export async function judgePlan(
         return JUDGE_EXIT.infra;
       }
 
-      const judgeModel = opts?.judgeModel ?? process.env.PINGA_JUDGE_MODEL ?? null;
-      if (!judgeModel) {
+      const claimedJudge = opts?.judgeModel ?? process.env.PINGA_JUDGE_MODEL ?? null;
+      if (!claimedJudge) {
         emit(
           ledger,
           judgeReceipt({
@@ -318,6 +318,37 @@ export async function judgePlan(
         );
         return JUDGE_EXIT.model_unattested;
       }
+
+      // Atestação obrigatória do juiz externo: transcript (usage file) ou endpoint.
+      const usagePath = opts?.usageFile ?? process.env.PINGA_USAGE_FILE;
+      let attested: import("./receipt").Attestation | null = null;
+      if (usagePath) {
+        try {
+          const tRes = attestFromTranscript(readFileSync(usagePath, "utf8"), claimedJudge);
+          if (tRes.ok) attested = tRes.attested;
+        } catch {
+          // transcript ilegível: cai no endpoint
+        }
+      }
+      if (attested === null) {
+        emit(
+          ledger,
+          judgeReceipt({
+            task,
+            status: "blocked",
+            reason_code: "model_unattested",
+            attempts,
+            evidence: [],
+            tokenFields,
+            author,
+            verified_by: null,
+            summary: `${task} blocked: modelo do juiz não atestado (transcript ausente ou inválido)`,
+          }),
+        );
+        return JUDGE_EXIT.model_unattested;
+      }
+
+      const judgeModel = attested.served;
       const judgeFamily = modelFamily(judgeModel);
 
       const distExec = assertDistinctFamily(execFamily, judgeFamily);
@@ -334,6 +365,7 @@ export async function judgePlan(
             author,
             verified_by: null,
             summary: `${task} blocked: juiz ${judgeModel} é da mesma família do executor (${judgeFamily})`.slice(0, 280),
+            model_attested: attested,
           }),
         );
         return JUDGE_EXIT[distExec.reason_code];
@@ -356,6 +388,7 @@ export async function judgePlan(
               author,
               verified_by: null,
               summary: `${task} blocked: juiz ${judgeModel} é da mesma família do planner (${judgeFamily})`.slice(0, 280),
+              model_attested: attested,
             }),
           );
           return JUDGE_EXIT[distPlan.reason_code];
@@ -376,6 +409,7 @@ export async function judgePlan(
           author,
           verified_by: { model: judgeModel, family: judgeFamily },
           summary: `${task} ${status}: juiz externo ${judgeModel} (${judgeFamily})`.slice(0, 280),
+          model_attested: attested,
         }),
       );
       return status === "pass" ? JUDGE_EXIT.pass : JUDGE_EXIT.judge_rejected;
