@@ -25,6 +25,12 @@ export type GuardInput = {
   /** Desarma `delta_no_touch` (operador declara trabalho já existente). */
   allowNoDelta?: boolean;
   /**
+   * Pasta de sidecars da task, relativa à raiz do repo (novo formato:
+   * `.ginga/plans/PLAN-NNNN-x/.pinga/TASK-NN`). Omitida no legado, cujos
+   * EXEC/EVAL continuam em `tasks/<task>/`.
+   */
+  sidecar?: string;
+  /**
    * Opt-in estreito (T59): libera `scope_drift` apenas para os arquivos do
    * próprio verifier, e devolve quais foram liberados em `allowed_drift` para
    * que o artefato não esconda o escape. Qualquer outro path fora do `touch`
@@ -43,8 +49,9 @@ export type GuardResult =
   | { ok: false; reason_code: "scope_drift"; files: string[]; exit: 6 }
   | { ok: false; reason_code: "delta_no_touch"; files: string[]; exit: 7 };
 
-export function alwaysAllowed(task: string): string[] {
-  return [`tasks/${task}/EXEC.md`, `tasks/${task}/EVAL.md`];
+export function alwaysAllowed(task: string, sidecar?: string): string[] {
+  const dir = sidecar !== undefined && sidecar !== "" ? sidecar : `tasks/${task}`;
+  return [`${dir}/EXEC.md`, `${dir}/EVAL.md`];
 }
 
 /**
@@ -104,7 +111,7 @@ export function evaluateGuards(input: GuardInput): GuardResult {
   let allowedDrift: string[] = [];
 
   if (input.touch !== undefined) {
-    const declared = [...input.touch, ...alwaysAllowed(input.task)];
+    const declared = [...input.touch, ...alwaysAllowed(input.task, input.sidecar)];
     const released = input.allowVerifierDrift === true ? verifierFiles() : [];
     const allowed = new Set([...declared, ...released]);
     const files = input.changed

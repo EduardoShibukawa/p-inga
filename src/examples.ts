@@ -9,7 +9,6 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import {
-  basename,
   dirname,
   join,
   relative as pathRelative,
@@ -18,6 +17,7 @@ import {
 } from "node:path";
 import { canonicalJson } from "./canonical";
 import { parsePlan } from "./plan";
+import { taskRef } from "./task_ref";
 
 function sha256hex(data: Buffer | string): string {
   return createHash("sha256").update(data).digest("hex");
@@ -311,7 +311,7 @@ export function examplesPlan(planPath: string, opts: { from?: string }): number 
   }
 
   const resolvedPlanPath = resolve(planPath);
-  const task = basename(dirname(resolvedPlanPath));
+  const task = taskRef(resolvedPlanPath);
 
   let planText: string;
   try {

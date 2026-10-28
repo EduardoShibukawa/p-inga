@@ -27,7 +27,7 @@ export type Status = (typeof STATUSES)[number];
  * congelado (tests/receipt.test.ts fixa a ordem exata), então o vocabulário
  * vive aqui e o validador aceita a união — nenhum recibo novo fica inválido.
  */
-export const EXTRA_REASON_CODES = ["no_tests_run"] as const;
+export const EXTRA_REASON_CODES = ["no_tests_run", "tasks_open"] as const;
 export const VALID_REASON_CODES: readonly string[] = [
   ...REASON_CODES,
   ...EXTRA_REASON_CODES,
@@ -94,6 +94,8 @@ export type Receipt = {
     failure_signature: string | null;
   };
   checkpoint_ref?: string;
+  /** `plan` marca o recibo de integração de um PLAN (todas as TASKs pass). */
+  check?: string;
   next_action?: string;
   question?: {
     text: string;
@@ -305,6 +307,7 @@ export function validateReceipt(
       "mode_override",
       "breaker",
       "checkpoint_ref",
+      "check",
       "next_action",
       "question",
       "model_attested",
@@ -489,6 +492,7 @@ export function validateReceipt(
       }
     }
     checkOptionalString(x, "checkpoint_ref", msg);
+    checkOptionalString(x, "check", msg);
     checkOptionalString(x, "next_action", msg);
 
     if (x.model_attested !== undefined) {

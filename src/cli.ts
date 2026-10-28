@@ -10,6 +10,7 @@ import { defaultManifestPath, type Harness } from "./manifest";
 import { adoptLocalEntries } from "./adopt";
 import { provePlan } from "./prove";
 import { verifyPlan } from "./verify";
+import { isPlanDoc, verifyPlanDoc } from "./plan_verify";
 import { doctorCmd } from "./doctor";
 import { defaultLearnDbPath, ingest, ingestMultiHarness, LEARN_EXIT, openLearnDb } from "./learn";
 import { promoteCmd, proposeCmd } from "./lessons";
@@ -42,11 +43,11 @@ import { supersedeTask } from "./supersede";
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga queue [--json] [--notify] [--root DIR] [--ledger PATH] [--claim [TASK] [--ttl S]] [--release TASK]
                    [--probe TASK | --probe-all] [--probe-timeout S]
-       pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base] [--no-baseline] [--require-delta] [--allow-no-delta] [--allow-verifier-drift]
+       pinga verify <PLAN.md> [--root PATH] [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base] [--no-baseline] [--require-delta] [--allow-no-delta] [--allow-verifier-drift]
        pinga supersede <TASK> --reason TEXTO [--ledger PATH] [--timeout S]
-       pinga prove-red <PLAN.md> [--ledger PATH] [--base SHA]
+       pinga prove-red <PLAN.md> [--root PATH] [--ledger PATH] [--base SHA]
        pinga mode <PLAN.md> [--base SHA] [--override-mode M --reason TEXTO]
-       pinga judge <PLAN.md> [--ledger PATH] [--judge-model M] [--endpoint URL] [--base SHA] [--usage-file PATH]
+       pinga judge <PLAN.md> [--root PATH] [--ledger PATH] [--judge-model M] [--endpoint URL] [--base SHA] [--usage-file PATH]
        pinga eval <PLAN.md> [--ledger PATH] [--check]
        pinga examples <PLAN.md> --from PATH
        pinga learn ingest [--ledger PATH] [--evals DIR] [--sessions DIR] [--db PATH] [--repo NOME] [--denylist PATH]
@@ -463,6 +464,7 @@ export async function runCli(argv: string[]): Promise<number> {
     let ledgerPath: string | undefined;
     let attempt: number | undefined;
     let base: string | undefined;
+    let root: string | undefined;
     let usageFile: string | undefined;
     let overrideMode: string | undefined;
     let reason: string | undefined;
@@ -507,6 +509,14 @@ export async function runCli(argv: string[]): Promise<number> {
         }
         base = value;
         i++;
+      } else if (arg === "--root") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "" || value.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        root = value;
+        i++;
       } else if (arg === "--usage-file") {
         const value = rest[i + 1];
         if (value === undefined || value === "" || value.startsWith("--")) {
@@ -539,8 +549,19 @@ export async function runCli(argv: string[]): Promise<number> {
       }
     }
 
+    // Documento `type: plan` (bundle PLAN-NNNN/TASK-NN): integração própria —
+    // exige pass de todas as TASKs e roda o done_when do PLAN. O parse de TASK
+    // não o aceita, então o desvio acontece antes do verifyPlan.
+    if (isPlanDoc(planPath)) {
+      return verifyPlanDoc(planPath, ledgerPath, attempt, {
+        root,
+        usageFile,
+      });
+    }
+
     return verifyPlan(planPath, ledgerPath, attempt, {
       base,
+      root,
       usageFile,
       overrideMode,
       reason,
@@ -562,7 +583,12 @@ export async function runCli(argv: string[]): Promise<number> {
       console.error(USAGE);
       return 2;
     }
-    const planPath = `tasks/${taskArg.trim().toUpperCase()}/PLAN.md`;
+    const arg = taskArg.trim();
+    // Aceita o id legado (T<N>) ou o caminho de um PLAN/TASK já no formato novo.
+    const planPath =
+      arg.includes("/") || /\.md$/i.test(arg)
+        ? arg
+        : `tasks/${arg.toUpperCase()}/PLAN.md`;
     let reason: string | undefined;
     let ledgerPath: string | undefined;
     let timeoutMs: number | undefined;
@@ -616,6 +642,7 @@ export async function runCli(argv: string[]): Promise<number> {
 
     let ledgerPath: string | undefined;
     let base: string | undefined;
+    let root: string | undefined;
 
     for (let i = 0; i < rest.length; i++) {
       const arg = rest[i];
@@ -626,6 +653,14 @@ export async function runCli(argv: string[]): Promise<number> {
           return 2;
         }
         ledgerPath = value;
+        i++;
+      } else if (arg === "--root") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "" || value.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        root = value;
         i++;
       } else if (arg === "--base") {
         const value = rest[i + 1];
@@ -641,7 +676,7 @@ export async function runCli(argv: string[]): Promise<number> {
       }
     }
 
-    return provePlan(planPath, { ledgerPath, base });
+    return provePlan(planPath, { ledgerPath, base, root });
   }
 
   if (command === "mode") {
@@ -701,6 +736,7 @@ export async function runCli(argv: string[]): Promise<number> {
     let judgeModel: string | undefined;
     let endpoint: string | undefined;
     let base: string | undefined;
+    let root: string | undefined;
     let usageFile: string | undefined;
 
     const valueFlags = new Set([
@@ -708,6 +744,7 @@ export async function runCli(argv: string[]): Promise<number> {
       "--judge-model",
       "--endpoint",
       "--base",
+      "--root",
       "--usage-file",
     ]);
 
@@ -723,6 +760,7 @@ export async function runCli(argv: string[]): Promise<number> {
         else if (arg === "--judge-model") judgeModel = value;
         else if (arg === "--endpoint") endpoint = value;
         else if (arg === "--base") base = value;
+        else if (arg === "--root") root = value;
         else if (arg === "--usage-file") usageFile = value;
         i++;
       } else {
@@ -731,7 +769,7 @@ export async function runCli(argv: string[]): Promise<number> {
       }
     }
 
-    return judgePlan(planPath, { ledgerPath, judgeModel, endpoint, base, usageFile });
+    return judgePlan(planPath, { ledgerPath, judgeModel, endpoint, base, root, usageFile });
   }
 
   if (command === "eval") {
