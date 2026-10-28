@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { holdoutRunnerPath, runHoldout } from "./examples";
+import { WRAPPER_UNAVAILABLE_EXIT, doneWhenArgv, wrapperProblem } from "./exec";
 import { findRedBase } from "./guards";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { parsePlan } from "./plan";
@@ -162,7 +163,13 @@ export function classifyBaseRun(r: {
   timedOut: boolean;
   output?: string;
 }): ProofVerdict {
-  if (r.timedOut || r.exit === null || r.exit === 126 || r.exit === 127) {
+  if (
+    r.timedOut ||
+    r.exit === null ||
+    r.exit === 126 ||
+    r.exit === 127 ||
+    r.exit === WRAPPER_UNAVAILABLE_EXIT
+  ) {
     return "inconclusive";
   }
   if (r.exit === 0) return "test_passed_on_base";
@@ -179,11 +186,14 @@ export function combineProof(
   if (doneWhen === "test_passed_on_base") {
     return { verdict: "test_passed_on_base", which: "done_when" };
   }
-  if (holdout === "test_passed_on_base") {
-    return { verdict: "test_passed_on_base", which: "holdout" };
-  }
+  // T72: done_when inconclusive (inclui exit 97 = WRAPPER_UNAVAILABLE_EXIT do
+  // sandbox) tem precedência sobre o holdout — o holdout não pode transformar
+  // um infra em test_passed_on_base.
   if (doneWhen === "inconclusive") {
     return { verdict: "inconclusive", which: "done_when" };
+  }
+  if (holdout === "test_passed_on_base") {
+    return { verdict: "test_passed_on_base", which: "holdout" };
   }
   if (holdout === "inconclusive") {
     return { verdict: "inconclusive", which: "holdout" };
@@ -360,7 +370,7 @@ export function proveBase(
     }
 
     const t0 = Date.now();
-    const res = Bun.spawnSync(["sh", "-c", plan.done_when], {
+    const res = Bun.spawnSync(doneWhenArgv(plan.done_when, wtPath), {
       cwd: wtPath,
       timeout: timeoutMs,
       stdout: "pipe",
@@ -431,6 +441,14 @@ export function provePlan(
   planPath: string,
   opts?: { ledgerPath?: string; base?: string; root?: string },
 ): number {
+  // T72: fail-closed como verify (src/verify.ts). Com PINGA_EXEC_WRAPPER
+  // configurado e inutilizável, nada roda — nem prova no base, nem holdout.
+  const wrapErr = wrapperProblem();
+  if (wrapErr !== null) {
+    console.error(`prove: ${wrapErr}; nada rodou`);
+    return PROVE_EXIT.infra;
+  }
+
   const resolvedPlanPath = resolve(planPath);
   const task = taskRef(resolvedPlanPath);
 
@@ -505,7 +523,7 @@ export function provePlan(
           280,
         );
     } else {
-      status = "not run";
+      status = proof.evidence[0]?.exit === WRAPPER_UNAVAILABLE_EXIT ? "blocked" : "not run";
       reason_code = "infra";
       cliExit = PROVE_EXIT.infra;
       summary =
