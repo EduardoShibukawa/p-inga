@@ -6,6 +6,7 @@ touch:
   - src/cli.ts
   - src/lessons_migrado.ts
   - tests/learn_migrado.test.ts
+  - tasks/T81/PLAN.md
 tests_frozen:
   - tests/learn_migrado.test.ts
 ---
