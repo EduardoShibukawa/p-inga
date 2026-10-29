@@ -1,14 +1,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { claudeAdapter } from "./adapters/claude";
-import { hermesAdapter } from "./adapters/hermes";
-import { opencodeAdapter } from "./adapters/opencode";
-import { piAdapter } from "./adapters/pi";
-import { tuiosAdapter } from "./adapters/tuios";
 import { attestFromEndpoint } from "./family";
 import { contextProvider } from "./hooks";
-import { ADAPTER_ORDER, type Adapter, type Probe, pickSource } from "./install";
 import {
   defaultManifestPath,
   sha256File,
@@ -110,19 +104,6 @@ export type DoctorOptions = {
   endpoint?: string;
   manifestPath?: string;
   env?: Record<string, string | undefined>;
-};
-
-/** Fonte do pi-harness (mesma porta do install). */
-function sourceOf(env: Record<string, string | undefined>): string {
-  return pickSource(env);
-}
-
-const ADAPTERS: Record<string, Adapter> = {
-  pi: piAdapter,
-  claude: claudeAdapter,
-  opencode: opencodeAdapter,
-  hermes: hermesAdapter,
-  tuios: tuiosAdapter,
 };
 
 function isFiltered(harness: string, only?: string): boolean {
@@ -266,104 +247,6 @@ function manifestIntegrityRecord(
   );
 }
 
-/** §8: roda um probe com o HOME do --home; ausência/timeout/filtragem tratados. */
-function runProbe(
-  harness: string,
-  adapter: Adapter,
-  probe: Probe,
-  opts: {
-    home: string;
-    source: string;
-    env: Record<string, string | undefined>;
-    timeoutMs: number;
-    only?: string;
-  },
-): DoctorRecord {
-  if (isFiltered(harness, opts.only)) {
-    return filteredRecord(harness, probe.check);
-  }
-  const t0 = Date.now();
-  const args = probe.cmd({ source: opts.source });
-  const bin = adapter.bin ?? args[0] ?? "";
-  const PATH = opts.env.PATH ?? process.env.PATH ?? "";
-  const resolved = bin === "" ? null : Bun.which(bin, { PATH });
-  if (resolved === null) {
-    return record(
-      harness,
-      probe.check,
-      "unverified",
-      law2For("unverified", "missing"),
-      null,
-      null,
-      null,
-      Date.now() - t0,
-      `${bin || "cli"} ausente`,
-    );
-  }
-  const cmd = [bin, ...args];
-  const childEnv: Record<string, string> = {};
-  for (const [key, value] of Object.entries(opts.env)) {
-    if (typeof value === "string") childEnv[key] = value;
-  }
-  childEnv.HOME = opts.home;
-  let exit: number | null;
-  let stdout = "";
-  let timedOut = false;
-  try {
-    const res = Bun.spawnSync([resolved, ...args], {
-      cwd: opts.home,
-      timeout: opts.timeoutMs,
-      env: childEnv,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    exit = res.exitCode;
-    stdout = res.stdout.toString();
-    timedOut = res.exitedDueToTimeout === true;
-  } catch {
-    exit = null;
-  }
-  const duration = Date.now() - t0;
-  if (timedOut || exit === null) {
-    return record(
-      harness,
-      probe.check,
-      "unverified",
-      law2For("unverified", "timeout"),
-      cmd,
-      null,
-      null,
-      duration,
-      `timeout: probe sem resposta em ${opts.timeoutMs} ms`,
-    );
-  }
-  // §8: exit 0 com stdout vazio (só espaços) -> degraded, sempre.
-  if (exit === 0 && stdout.trim() === "") {
-    return record(
-      harness,
-      probe.check,
-      "degraded",
-      law2For("degraded", "empty"),
-      cmd,
-      exit,
-      sha256hex(stdout),
-      duration,
-      `exit 0 com saída vazia em ${probe.check}`,
-    );
-  }
-  const verdict = probe.classify({ exit, stdout });
-  return record(
-    harness,
-    probe.check,
-    verdict.status,
-    law2For(verdict.status),
-    cmd,
-    exit,
-    sha256hex(stdout),
-    duration,
-    verdict.detail,
-  );
-}
 
 /** §10 llm/models: atestação do endpoint (T08). */
 async function llmRecord(
@@ -423,29 +306,13 @@ async function llmRecord(
   );
 }
 
-/** §7: 9 registros, nesta ordem. */
+/** §7: 2 registros, nesta ordem: manifest/integrity e llm/models. */
 export async function runDoctor(opts: DoctorOptions): Promise<DoctorRecord[]> {
   const env = opts.env ?? process.env;
   const timeoutMs = Number(env.PINGA_DOCTOR_TIMEOUT_MS ?? 30000);
-  const source = sourceOf(env);
   const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 30000;
 
   const records: DoctorRecord[] = [manifestIntegrityRecord(opts, env)];
-
-  for (const harness of ADAPTER_ORDER) {
-    const adapter = ADAPTERS[harness]!;
-    for (const probe of adapter.probes ?? []) {
-      records.push(
-        runProbe(harness, adapter, probe, {
-          home: opts.home,
-          source,
-          env,
-          timeoutMs: timeout,
-          only: opts.only,
-        }),
-      );
-    }
-  }
 
   records.push(await llmRecord(opts, env, timeout));
 
