@@ -10,6 +10,7 @@ import {
 import { join, relative, resolve } from "node:path";
 
 import { defaultLedgerPath, openLedger } from "./ledger";
+import { repoScope } from "./breaker";
 import { changedFiles, fileDigest } from "./guards";
 import type { DriftBaseline } from "./guards";
 import { parsePlan } from "./plan";
@@ -175,6 +176,27 @@ function latestReceipt(
  * `delta_no_touch` afirma que "o contrato já passa no base".
  */
 const PROCEDURAL_REASON_CODES = new Set(["delta_no_touch", "model_unattested", "infra"]);
+
+/**
+ * Escopo do repo (achado do judge): `pass` de T4 em outro repo fechava a T04
+ * desta raiz, porque a fila casava receipts só pelo número da task. Linha cujo
+ * `body.repo` existe e difere de `repoScope(root)` é descartada antes de casar
+ * receipts. Sem `repo` (ledger legado), body ilegível ou raiz fora do git
+ * (`repoScope` undefined): a linha fica — recibos antigos continuam valendo.
+ */
+function rowsInRepoScope(rows: LedgerRowLite[], root: string): LedgerRowLite[] {
+  const scope = repoScope(root);
+  if (scope === undefined) return rows;
+  return rows.filter((row) => {
+    try {
+      const parsed = JSON.parse(row.body) as { repo?: unknown };
+      if (typeof parsed.repo !== "string") return true;
+      return parsed.repo === scope;
+    } catch {
+      return true;
+    }
+  });
+}
 
 function hasPassReceipt(rows: LedgerRowLite[], task: string): boolean {
   const wanted = normalizeTask(task);
@@ -425,6 +447,9 @@ export function scanQueue(
   } else if (opts.ledgerPath !== undefined) {
     ledgerPath = opts.ledgerPath;
   }
+
+  // Escopo do repo (T79): nada casa receipt de outro git antes de classificar.
+  rows = rowsInRepoScope(rows, root);
 
   const report: QueueReport = {
     v: QUEUE_VERSION,
