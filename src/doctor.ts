@@ -7,6 +7,7 @@ import { opencodeAdapter } from "./adapters/opencode";
 import { piAdapter } from "./adapters/pi";
 import { tuiosAdapter } from "./adapters/tuios";
 import { attestFromEndpoint } from "./family";
+import { contextProvider } from "./hooks";
 import { ADAPTER_ORDER, type Adapter, type Probe, pickSource } from "./install";
 import {
   defaultManifestPath,
@@ -490,10 +491,18 @@ export function checkGiraStatus(
   if (giraPresent && macroMapPresent) {
     return { ok: true, message: "gira disponível e .gira/macro-map.json presente" };
   }
-  if (!giraPresent && !macroMapPresent) {
-    return { ok: false, message: "gira ausente no PATH e .gira/macro-map.json ausente" };
-  }
   if (!giraPresent) {
+    // A6: sem o provider configurado como gira, a ausência é aceitável — o
+    // contexto roda pela porta rg + git.
+    if (contextProvider(dir, env) !== "gira") {
+      return {
+        ok: true,
+        message: "gira ausente no PATH — opcional (contexto via provider rg)",
+      };
+    }
+    if (!macroMapPresent) {
+      return { ok: false, message: "gira ausente no PATH e .gira/macro-map.json ausente" };
+    }
     return { ok: false, message: "gira ausente no PATH" };
   }
   return { ok: false, message: `.gira/macro-map.json ausente em ${dir}` };
