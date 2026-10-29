@@ -1043,6 +1043,15 @@ export async function runCli(argv: string[]): Promise<number> {
         }
       }
 
+      try {
+        const { MIGRATION_NOTICE } = await import("./lessons_migrado");
+        console.error(MIGRATION_NOTICE);
+      } catch {
+        console.error(
+          "aviso: lições migraram para o ginga (ginga lessons import / ginga learning promote)",
+        );
+      }
+
       return proposeCmd({
         db,
         out,
@@ -1088,6 +1097,15 @@ export async function runCli(argv: string[]): Promise<number> {
       if (proposals === undefined || id === undefined || to === undefined) {
         console.error(USAGE);
         return 2;
+      }
+
+      try {
+        const { MIGRATION_NOTICE } = await import("./lessons_migrado");
+        console.error(MIGRATION_NOTICE);
+      } catch {
+        console.error(
+          "aviso: lições migraram para o ginga (ginga lessons import / ginga learning promote)",
+        );
       }
 
       return promoteCmd({ proposals, id, to, by, env: process.env });
