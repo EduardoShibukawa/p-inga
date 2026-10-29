@@ -4,10 +4,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "
 import { judgePlan } from "./judge";
 import { modePlan } from "./mode";
 import { isProvisionalTest, precommitDecision } from "./guards";
-import { ADAPTER_ORDER, installCmd } from "./install";
 import { defaultLedgerPath, openLedger } from "./ledger";
-import { defaultManifestPath, type Harness } from "./manifest";
-import { adoptLocalEntries } from "./adopt";
 import { provePlan } from "./prove";
 import { verifyPlan } from "./verify";
 import { isPlanDoc, verifyPlanDoc } from "./plan_verify";
@@ -58,8 +55,7 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga learn promote <PROPOSED.md> --id <L-…> --to <LESSONS.md> [--by NOME]
        pinga learn audit [--db PATH] [--repo PATH] [--sample N] [--threshold T] [--json]
        pinga precommit [-- <cmd...>]
-       pinga install (--dry-run | --apply | --revert | --rebaseline) [--only H] [--manifest PATH] [--home PATH]
-       pinga adopt (--dry-run | --apply) [--home PATH] [--manifest PATH]
+       pinga install | pinga adopt  ->  movido para ginga install (exit 2)
        pinga doctor [--json] [--only H] [--endpoint URL] [--home PATH] [--manifest PATH]
        pinga tdd list
        pinga maestro scoreboard [--ledger PATH] [--db PATH] [--json]
@@ -850,110 +846,9 @@ export async function runCli(argv: string[]): Promise<number> {
     return examplesPlan(planPath, { from });
   }
 
-  if (command === "install") {
-    const modes = new Set<string>();
-    let home: string | undefined;
-    let manifestPath: string | undefined;
-    let only: string | undefined;
-
-    // O primeiro argumento cai em `subcommand`; o modo pode estar em
-    // qualquer posição.
-    const args = [subcommand, ...rest].filter((a) => a !== undefined);
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      if (arg === "--dry-run" || arg === "--apply" || arg === "--revert" || arg === "--rebaseline") {
-        modes.add(arg);
-      } else if (arg === "--home" || arg === "--manifest" || arg === "--only") {
-        const value = args[i + 1];
-        if (value === undefined || value === "") {
-          console.error(USAGE);
-          return 2;
-        }
-        i++;
-        if (arg === "--home") home = value;
-        else if (arg === "--manifest") manifestPath = value;
-        else only = value;
-      } else {
-        console.error(USAGE);
-        return 2;
-      }
-    }
-
-    if (modes.size !== 1) {
-      console.error(USAGE);
-      return 2;
-    }
-
-    const resolvedHome = home ?? process.env.HOME;
-    if (resolvedHome === undefined || !existsSync(resolvedHome)) {
-      console.error(USAGE);
-      return 2;
-    }
-
-    const mode = modes.has("--dry-run")
-      ? ("dry-run" as const)
-      : modes.has("--apply")
-        ? ("apply" as const)
-        : modes.has("--rebaseline")
-          ? ("rebaseline" as const)
-          : ("revert" as const);
-    return installCmd({
-      mode,
-      home: resolvedHome,
-      manifestPath,
-      only: only as Harness | undefined,
-      env: process.env,
-    });
-  }
-
-  if (command === "adopt") {
-    const modes = new Set<string>();
-    let home: string | undefined;
-    let manifestPath: string | undefined;
-
-    const args = [subcommand, ...rest].filter((a) => a !== undefined);
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      if (arg === "--dry-run" || arg === "--apply") {
-        modes.add(arg);
-      } else if (arg === "--home" || arg === "--manifest") {
-        const value = args[i + 1];
-        if (value === undefined || value === "") {
-          console.error(USAGE);
-          return 2;
-        }
-        i++;
-        if (arg === "--home") home = value;
-        else manifestPath = value;
-      } else {
-        console.error(USAGE);
-        return 2;
-      }
-    }
-
-    if (modes.size !== 1) {
-      console.error(USAGE);
-      return 2;
-    }
-
-    const resolvedHome = home ?? process.env.HOME;
-    if (resolvedHome === undefined || !existsSync(resolvedHome)) {
-      console.error(USAGE);
-      return 2;
-    }
-
-    const env = process.env;
-    const resolvedManifest = manifestPath ?? defaultManifestPath(env);
-
-    const apply = modes.has("--apply");
-    await adoptLocalEntries({
-      homeDir: resolvedHome,
-      manifestPath: resolvedManifest,
-      apply,
-    });
-    return 0;
+  if (command === "install" || command === "adopt") {
+    console.error("pinga install e pinga adopt foram movidos para `ginga install` (bundle do workspace)");
+    return 2;
   }
 
   if (command === "doctor") {
@@ -997,7 +892,6 @@ export async function runCli(argv: string[]): Promise<number> {
 
     if (
       only !== undefined &&
-      !(ADAPTER_ORDER as readonly string[]).includes(only) &&
       only !== "llm" &&
       only !== "manifest"
     ) {
