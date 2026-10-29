@@ -48,7 +48,7 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga supersede <TASK> --reason TEXTO [--ledger PATH] [--timeout S]
        pinga prove-red <PLAN.md> [--root PATH] [--ledger PATH] [--base SHA]
        pinga mode <PLAN.md> [--base SHA] [--override-mode M --reason TEXTO]
-       pinga judge <PLAN.md> [--root PATH] [--ledger PATH] [--judge-model M] [--endpoint URL] [--base SHA] [--usage-file PATH]
+       pinga judge <PLAN.md> [--root PATH] [--ledger PATH] [--judge-model M] [--planner-model P] [--verdict F] [--endpoint URL] [--base SHA] [--usage-file PATH]
        pinga eval <PLAN.md> [--ledger PATH] [--check]
        pinga examples <PLAN.md> --from PATH
        pinga learn ingest [--ledger PATH] [--evals DIR] [--sessions DIR] [--db PATH] [--repo NOME] [--denylist PATH]
@@ -742,6 +742,8 @@ export async function runCli(argv: string[]): Promise<number> {
 
     let ledgerPath: string | undefined;
     let judgeModel: string | undefined;
+    let plannerModel: string | undefined;
+    let verdict: string | undefined;
     let endpoint: string | undefined;
     let base: string | undefined;
     let root: string | undefined;
@@ -750,6 +752,8 @@ export async function runCli(argv: string[]): Promise<number> {
     const valueFlags = new Set([
       "--ledger",
       "--judge-model",
+      "--planner-model",
+      "--verdict",
       "--endpoint",
       "--base",
       "--root",
@@ -766,6 +770,8 @@ export async function runCli(argv: string[]): Promise<number> {
         }
         if (arg === "--ledger") ledgerPath = value;
         else if (arg === "--judge-model") judgeModel = value;
+        else if (arg === "--planner-model") plannerModel = value;
+        else if (arg === "--verdict") verdict = value;
         else if (arg === "--endpoint") endpoint = value;
         else if (arg === "--base") base = value;
         else if (arg === "--root") root = value;
@@ -777,7 +783,7 @@ export async function runCli(argv: string[]): Promise<number> {
       }
     }
 
-    return judgePlan(planPath, { ledgerPath, judgeModel, endpoint, base, root, usageFile });
+    return judgePlan(planPath, { ledgerPath, judgeModel, plannerModel, verdict, endpoint, base, root, usageFile });
   }
 
   if (command === "eval") {
