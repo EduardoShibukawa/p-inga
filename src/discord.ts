@@ -1,10 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-
-function home(): string {
-  return process.env.HOME && process.env.HOME !== "" ? process.env.HOME : homedir();
-}
 import type { Receipt } from "./receipt";
 
 export interface DiscordConfig {
@@ -13,56 +6,15 @@ export interface DiscordConfig {
 }
 
 /**
- * Resolves Discord configuration from environment variables or Hermes configuration files.
+ * Resolves Discord configuration from the environment only (A4 — PLAN-0010
+ * TASK-06): `DISCORD_BOT_TOKEN` + `DISCORD_CHANNEL_ID`, sem canal padrão
+ * fixo: faltando qualquer um dos dois → `null`.
  */
 export function resolveDiscordConfig(): DiscordConfig | null {
-  let token = process.env.DISCORD_BOT_TOKEN;
-  let channelId = process.env.DISCORD_CHANNEL_ID;
+  const token = process.env.DISCORD_BOT_TOKEN;
+  const channelId = process.env.DISCORD_CHANNEL_ID;
 
-  // Check ~/.hermes/profiles/pinga/.env
-  const pingaEnvPath = join(home(), ".hermes", "profiles", "pinga", ".env");
-  if (!token && existsSync(pingaEnvPath)) {
-    try {
-      const content = readFileSync(pingaEnvPath, "utf8");
-      const match = content.match(/DISCORD_BOT_TOKEN=([^\r\n]+)/);
-      if (match && match[1]) {
-        token = match[1].trim();
-      }
-    } catch {}
-  }
-
-  // Check ~/.hermes/.env
-  const hermesEnvPath = join(home(), ".hermes", ".env");
-  if (!token && existsSync(hermesEnvPath)) {
-    try {
-      const content = readFileSync(hermesEnvPath, "utf8");
-      const match = content.match(/DISCORD_BOT_TOKEN=([^\r\n]+)/);
-      if (match && match[1]) {
-        token = match[1].trim();
-      }
-    } catch {}
-  }
-
-  // Resolve channelId from ~/.hermes/profiles/pinga/config.yaml
-  if (!channelId) {
-    const pingaConfigPath = join(home(), ".hermes", "profiles", "pinga", "config.yaml");
-    if (existsSync(pingaConfigPath)) {
-      try {
-        const content = readFileSync(pingaConfigPath, "utf8");
-        const match = content.match(/chat_id:\s*['"]?([0-9]+)['"]?/);
-        if (match && match[1]) {
-          channelId = match[1].trim();
-        }
-      } catch {}
-    }
-  }
-
-  // Default homelab Discord notification channel (#hermes)
-  if (!channelId) {
-    channelId = "1563272747591803110";
-  }
-
-  if (!token) {
+  if (!token || !channelId) {
     return null;
   }
 

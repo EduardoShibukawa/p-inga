@@ -26,6 +26,7 @@ import {
 import { compactContext } from "./compact";
 import { evaluateDocument, renderScorecardMarkdown } from "./docs_eval";
 import { notifyDigest, sendDiscordMessage } from "./discord";
+import { emitNoticeEvent } from "./events";
 import {
   canClaim,
   claim,
@@ -419,10 +420,17 @@ export async function runCli(argv: string[]): Promise<number> {
     }
 
     if (has("--notify") && notice !== null) {
-      const sent = await notifyDigest(notice);
-      if (!sent) {
-        console.error("notify: falha ao enviar o aviso para o Discord");
-        return 1;
+      // A4 (PLAN-0010 TASK-06): com $GINGA_EVENTS o aviso acionável vira
+      // evento (kind blocker) para o Ginga rotear; sem a porta, fallback
+      // para o Discord como antes.
+      if (process.env.GINGA_EVENTS) {
+        emitNoticeEvent(notice);
+      } else {
+        const sent = await notifyDigest(notice);
+        if (!sent) {
+          console.error("notify: falha ao enviar o aviso para o Discord");
+          return 1;
+        }
       }
     }
     return 0;
@@ -1684,6 +1692,13 @@ export async function runCli(argv: string[]): Promise<number> {
     if (!message) {
       console.error(USAGE);
       return 2;
+    }
+    // A4 (PLAN-0010 TASK-06): com a porta de eventos ligada, o pinga só
+    // emite (kind blocker); o Discord passa a ser responsabilidade do Ginga.
+    if (process.env.GINGA_EVENTS) {
+      emitNoticeEvent(message);
+      console.log("ok");
+      return 0;
     }
     const res = await sendDiscordMessage(message);
     if (!res.ok) {
