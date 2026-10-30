@@ -99,15 +99,15 @@ export function contextProvider(
   return Bun.which("gira", { PATH: pathEnv }) !== null ? "gira" : "rg";
 }
 
-// O default do guard NÃO consulta o PATH (mantém as mensagens atuais); só uma
-// config explícita com provider ≠ gira troca a dica.
+// A6: o guard segue o provider resolvido (config → PATH → rg), não apenas a
+// config explícita, para que ambientes sem gira não recebam dica citando gira.
 function guardReasonFor(
   base: string,
   giraReason: string,
   rgReason: string
 ): string {
-  const provider = configuredProvider(base);
-  return provider !== undefined && provider !== "gira" ? rgReason : giraReason;
+  const provider = contextProvider(base);
+  return provider !== "gira" ? rgReason : giraReason;
 }
 
 const READ_TOOLS = new Set(["read_file", "list_files", "search", "check_syntax"]);
