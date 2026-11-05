@@ -7,15 +7,18 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { holdoutRunnerPath, runHoldout } from "./examples";
+import { WRAPPER_UNAVAILABLE_EXIT, doneWhenArgv, wrapperProblem } from "./exec";
 import { findRedBase } from "./guards";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { parsePlan } from "./plan";
 import type { Plan } from "./plan";
+import { taskRef } from "./task_ref";
 import type { Evidence, ReasonCode, Receipt, Status } from "./receipt";
 import { receiptKind } from "./receipt";
 import { NOT_RUN_TOKENS } from "./tokens";
@@ -52,6 +55,66 @@ function cleanEnv(): Record<string, string> {
 
 function sha256hex(data: Buffer | string): string {
   return createHash("sha256").update(data).digest("hex");
+}
+
+/**
+ * T65: raiz de trabalho de um PLAN/TASK.
+ *
+ * Sem `--root`, o comportamento é o de sempre: `git rev-parse` a partir da
+ * pasta do arquivo (e essa pasta quando não há repo). Com `--root R`, a raiz
+ * passa a ser R — que precisa ser a raiz de um repo git, senão o comando
+ * falha antes de escrever qualquer recibo.
+ */
+export function resolveRepoRoot(
+  planPath: string,
+  root?: string,
+): { ok: true; root: string } | { ok: false; error: string } {
+  const planDir = dirname(planPath);
+  const gitRoot = (cwd: string) => {
+    try {
+      return Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
+        cwd,
+        stdout: "pipe",
+        stderr: "pipe",
+        env: cleanEnv(),
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  if (root === undefined || root === "") {
+    const res = gitRoot(planDir);
+    return {
+      ok: true,
+      root:
+        res !== null && res.exitCode === 0
+          ? res.stdout.toString().trim()
+          : planDir,
+    };
+  }
+
+  const abs = resolve(root);
+  const notRepo = { ok: false as const, error: `--root não é repo git: ${root}` };
+  if (!existsSync(abs) || !statSync(abs).isDirectory()) return notRepo;
+
+  const res = gitRoot(abs);
+  if (res === null || res.exitCode !== 0) return notRepo;
+
+  const top = res.stdout.toString().trim();
+  let sameRoot = top === abs;
+  try {
+    sameRoot = realpathSync(top) === realpathSync(abs);
+  } catch {
+    // path exótico: fica a comparação textual
+  }
+  if (!sameRoot) {
+    return {
+      ok: false,
+      error: `--root não é a raiz de um repo git: ${root} (raiz: ${top})`,
+    };
+  }
+  return { ok: true, root: abs };
 }
 
 function authorFromEnv(): { model: string | null; family: string | null } {
@@ -100,7 +163,13 @@ export function classifyBaseRun(r: {
   timedOut: boolean;
   output?: string;
 }): ProofVerdict {
-  if (r.timedOut || r.exit === null || r.exit === 126 || r.exit === 127) {
+  if (
+    r.timedOut ||
+    r.exit === null ||
+    r.exit === 126 ||
+    r.exit === 127 ||
+    r.exit === WRAPPER_UNAVAILABLE_EXIT
+  ) {
     return "inconclusive";
   }
   if (r.exit === 0) return "test_passed_on_base";
@@ -117,11 +186,14 @@ export function combineProof(
   if (doneWhen === "test_passed_on_base") {
     return { verdict: "test_passed_on_base", which: "done_when" };
   }
-  if (holdout === "test_passed_on_base") {
-    return { verdict: "test_passed_on_base", which: "holdout" };
-  }
+  // T72: done_when inconclusive (inclui exit 97 = WRAPPER_UNAVAILABLE_EXIT do
+  // sandbox) tem precedência sobre o holdout — o holdout não pode transformar
+  // um infra em test_passed_on_base.
   if (doneWhen === "inconclusive") {
     return { verdict: "inconclusive", which: "done_when" };
+  }
+  if (holdout === "test_passed_on_base") {
+    return { verdict: "test_passed_on_base", which: "holdout" };
   }
   if (holdout === "inconclusive") {
     return { verdict: "inconclusive", which: "holdout" };
@@ -298,7 +370,7 @@ export function proveBase(
     }
 
     const t0 = Date.now();
-    const res = Bun.spawnSync(["sh", "-c", plan.done_when], {
+    const res = Bun.spawnSync(doneWhenArgv(plan.done_when, wtPath), {
       cwd: wtPath,
       timeout: timeoutMs,
       stdout: "pipe",
@@ -367,10 +439,18 @@ export function proveBase(
 
 export function provePlan(
   planPath: string,
-  opts?: { ledgerPath?: string; base?: string },
+  opts?: { ledgerPath?: string; base?: string; root?: string },
 ): number {
+  // T72: fail-closed como verify (src/verify.ts). Com PINGA_EXEC_WRAPPER
+  // configurado e inutilizável, nada roda — nem prova no base, nem holdout.
+  const wrapErr = wrapperProblem();
+  if (wrapErr !== null) {
+    console.error(`prove: ${wrapErr}; nada rodou`);
+    return PROVE_EXIT.infra;
+  }
+
   const resolvedPlanPath = resolve(planPath);
-  const task = basename(dirname(resolvedPlanPath));
+  const task = taskRef(resolvedPlanPath);
 
   let planText: string;
   try {
@@ -386,16 +466,12 @@ export function provePlan(
   }
   const plan = parsed.plan;
 
-  const gitRoot = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
-    cwd: dirname(resolvedPlanPath),
-    stdout: "pipe",
-    stderr: "pipe",
-    env: cleanEnv(),
-  });
-  const repoRoot =
-    gitRoot.exitCode === 0
-      ? gitRoot.stdout.toString().trim()
-      : dirname(resolvedPlanPath);
+  const rootRes = resolveRepoRoot(resolvedPlanPath, opts?.root);
+  if (!rootRes.ok) {
+    console.error(rootRes.error);
+    return 2;
+  }
+  const repoRoot = rootRes.root;
 
   const baseRes = resolveProofBase(repoRoot, task, opts?.base);
   if (!baseRes.ok) {
@@ -447,7 +523,7 @@ export function provePlan(
           280,
         );
     } else {
-      status = "not run";
+      status = proof.evidence[0]?.exit === WRAPPER_UNAVAILABLE_EXIT ? "blocked" : "not run";
       reason_code = "infra";
       cliExit = PROVE_EXIT.infra;
       summary =

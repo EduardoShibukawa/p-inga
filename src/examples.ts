@@ -9,7 +9,6 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import {
-  basename,
   dirname,
   join,
   relative as pathRelative,
@@ -17,7 +16,9 @@ import {
   sep,
 } from "node:path";
 import { canonicalJson } from "./canonical";
+import { doneWhenArgv } from "./exec";
 import { parsePlan } from "./plan";
+import { taskRef } from "./task_ref";
 
 function sha256hex(data: Buffer | string): string {
   return createHash("sha256").update(data).digest("hex");
@@ -311,7 +312,7 @@ export function examplesPlan(planPath: string, opts: { from?: string }): number 
   }
 
   const resolvedPlanPath = resolve(planPath);
-  const task = basename(dirname(resolvedPlanPath));
+  const task = taskRef(resolvedPlanPath);
 
   let planText: string;
   try {
@@ -483,7 +484,9 @@ export function runHoldout(
     writeFileSync(runnerAbs, content);
 
     const t0 = Date.now();
-    const res = Bun.spawnSync(["bun", "test", `./${runnerRel}`], {
+    // T72: o holdout também roda sob o wrapper (INTENT-0006 opção A) —
+    // sem spawn nu de `bun test`, o mesmo guard do done_when.
+    const res = Bun.spawnSync(doneWhenArgv(`bun test ./${runnerRel}`, workDir), {
       cwd: workDir,
       timeout: timeoutMs,
       stdout: "pipe",

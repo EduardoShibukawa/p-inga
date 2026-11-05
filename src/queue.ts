@@ -7,16 +7,27 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 import { defaultLedgerPath, openLedger } from "./ledger";
+import { repoScope } from "./breaker";
 import { changedFiles, fileDigest } from "./guards";
 import type { DriftBaseline } from "./guards";
 import { parsePlan } from "./plan";
+import { taskRef, taskSidecarDir } from "./task_ref";
 
 export const QUEUE_VERSION = 1;
+/** Versão do payload de `queue --json` (inclui as entradas do bundle). */
+export const QUEUE_SCHEMA_VERSION = 2;
 export const DEFAULT_LEASE_TTL_S = 1800;
 export const SNAPSHOT_VERSION = 2;
+
+/** Pasta de um PLAN no bundle: `PLAN-0005`, `PLAN-0005-pinga-task-e-plan`. */
+const PLAN_DIR_RE = /^(PLAN-\d+)(?:-|$)/;
+/** Arquivo de TASK no bundle: `TASK-01-x.md`. */
+const TASK_FILE_RE = /^TASK-.*\.md$/i;
+/** Nome canônico de uma TASK: `TASK-01`, `TASK-01-x`. */
+const TASK_NAME_RE = /^(TASK-\d+)/i;
 
 /**
  * Procedência do snapshot (T58). Sem ela, um run que resolve para um ledger
@@ -63,10 +74,16 @@ export type QueueEntry = {
   plan_errors: string[];
   lease: QueueLease | null;
   done_when_exit: number | null;
+  /** PLAN dono da TASK no bundle (`PLAN-0005`); null no legado `tasks/T*`. */
+  plan: string | null;
+  /** Deps (`depends_on`) ainda sem receipt `pass`, já como refs `PLAN-NNNN/TASK-NN`. */
+  blocked_by: string[];
 };
 
 export type QueueReport = {
   v: number;
+  /** Contrato de leitura do JSON: muda quando entram campos novos (bundle). */
+  schema_version: number;
   root: string;
   ledger: string | null;
   /** Procedência deste run (T58): o ledger resolvido, exista o arquivo ou não. */
@@ -160,6 +177,27 @@ function latestReceipt(
  */
 const PROCEDURAL_REASON_CODES = new Set(["delta_no_touch", "model_unattested", "infra"]);
 
+/**
+ * Escopo do repo (achado do judge): `pass` de T4 em outro repo fechava a T04
+ * desta raiz, porque a fila casava receipts só pelo número da task. Linha cujo
+ * `body.repo` existe e difere de `repoScope(root)` é descartada antes de casar
+ * receipts. Sem `repo` (ledger legado), body ilegível ou raiz fora do git
+ * (`repoScope` undefined): a linha fica — recibos antigos continuam valendo.
+ */
+function rowsInRepoScope(rows: LedgerRowLite[], root: string): LedgerRowLite[] {
+  const scope = repoScope(root);
+  if (scope === undefined) return rows;
+  return rows.filter((row) => {
+    try {
+      const parsed = JSON.parse(row.body) as { repo?: unknown };
+      if (typeof parsed.repo !== "string") return true;
+      return parsed.repo === scope;
+    } catch {
+      return true;
+    }
+  });
+}
+
 function hasPassReceipt(rows: LedgerRowLite[], task: string): boolean {
   const wanted = normalizeTask(task);
   return rows.some(
@@ -168,8 +206,8 @@ function hasPassReceipt(rows: LedgerRowLite[], task: string): boolean {
   );
 }
 
-function readLease(root: string, task: string): QueueLease | null {
-  const path = join(root, "tasks", task, ".lease");
+function readLeaseAt(dir: string): QueueLease | null {
+  const path = join(dir, ".lease");
   if (!existsSync(path)) return null;
   try {
     const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<QueueLease>;
@@ -185,6 +223,10 @@ function readLease(root: string, task: string): QueueLease | null {
   }
 }
 
+function readLease(root: string, task: string): QueueLease | null {
+  return readLeaseAt(join(root, "tasks", task));
+}
+
 function probeDoneWhen(root: string, cmd: string, timeoutMs: number): number | null {
   try {
     const proc = Bun.spawnSync(["sh", "-c", cmd], {
@@ -197,6 +239,176 @@ function probeDoneWhen(root: string, cmd: string, timeoutMs: number): number | n
   } catch {
     return null;
   }
+}
+
+/** Regra única de estado, usada pelo legado `tasks/T*` e pelo bundle `.ginga/plans`. */
+function resolveState(args: {
+  planOk: boolean;
+  doneWhenExit: number | null;
+  receipt: { seq: number; status: string; reason_code: string | null } | null;
+  rows: LedgerRowLite[];
+  task: string;
+  lease: QueueLease | null;
+}): QueueState {
+  if (!args.planOk) return "invalid_plan";
+  const { doneWhenExit, receipt, rows, task, lease } = args;
+  if (doneWhenExit === 0) {
+    return receipt?.status === "pass" ? "done" : "awaiting_receipt";
+  }
+  if (receipt?.status === "pass") return "done";
+  if (receipt?.status === "blocked" && receipt.reason_code === "superseded") {
+    // Fechada pelo operador: contrato já satisfeito no base, sem trabalho
+    // nesta fatia. Nunca vira `pass`; sai da fila e não é reexecutada.
+    return "superseded";
+  }
+  if (
+    receipt?.status === "blocked" &&
+    PROCEDURAL_REASON_CODES.has(receipt.reason_code ?? "") &&
+    hasPassReceipt(rows, task)
+  ) {
+    // O contrato já foi provado por um `pass` anterior; o recibo posterior é
+    // ruído processual (juiz sem atestação, infra, guarda de delta).
+    return "done";
+  }
+  if (receipt?.status === "blocked") return "blocked";
+  if (lease?.alive === true) return "leased";
+  // fail/not run/ausente => retomável
+  return "open";
+}
+
+/** Frontmatter cru (o PLAN do bundle não tem `mode`/`touch` para o `parsePlan`). */
+function readFrontmatterData(path: string): Record<string, unknown> | null {
+  try {
+    const lines = readFileSync(path, "utf8").replace(/\r?\n$/, "").split(/\r?\n/);
+    if (lines[0] !== "---") return null;
+    const closeIndex = lines.indexOf("---", 1);
+    if (closeIndex === -1) return null;
+    const data = Bun.YAML.parse(lines.slice(1, closeIndex).join("\n")) as unknown;
+    return typeof data === "object" && data !== null && !Array.isArray(data)
+      ? (data as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+type BundlePlan = { ref: string; dir: string };
+
+/** PLANs do bundle com `status: approved` — só eles enfileiram TASKs. */
+function approvedBundlePlans(root: string): BundlePlan[] {
+  const plansDir = join(root, ".ginga", "plans");
+  let names: string[];
+  try {
+    names = readdirSync(plansDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .sort();
+  } catch {
+    return [];
+  }
+  const out: BundlePlan[] = [];
+  for (const name of names) {
+    const ref = PLAN_DIR_RE.exec(name)?.[1];
+    if (ref === undefined) continue;
+    const dir = join(plansDir, name);
+    const planPath = join(dir, "PLAN.md");
+    if (!existsSync(planPath)) continue;
+    if (readFrontmatterData(planPath)?.status !== "approved") continue;
+    out.push({ ref, dir });
+  }
+  return out;
+}
+
+/** `TASK-01-x` → `PLAN-0001/TASK-01`; ref já completa é normalizada. */
+function depRef(dep: string, planRef: string): string | null {
+  const trimmed = dep.trim();
+  if (trimmed === "") return null;
+  const slash = trimmed.indexOf("/");
+  if (slash !== -1) {
+    const plan = PLAN_DIR_RE.exec(trimmed.slice(0, slash))?.[1] ?? trimmed.slice(0, slash);
+    const task = TASK_NAME_RE.exec(trimmed.slice(slash + 1))?.[1];
+    return task === undefined ? null : `${plan}/${task}`;
+  }
+  const task = TASK_NAME_RE.exec(trimmed)?.[1];
+  return task === undefined ? null : `${planRef}/${task}`;
+}
+
+/** Deps que ainda não têm receipt `pass`: é o que trava a TASK. */
+function pendingDeps(
+  deps: string[],
+  planRef: string,
+  rows: LedgerRowLite[],
+): string[] {
+  const out: string[] = [];
+  for (const dep of deps) {
+    const ref = depRef(dep, planRef);
+    if (ref === null || out.includes(ref)) continue;
+    if (!hasPassReceipt(rows, ref)) out.push(ref);
+  }
+  return out;
+}
+
+/** TASK-*.md do bundle, com estado vindo do ledger e `blocked_by` de `depends_on`. */
+function scanBundle(
+  root: string,
+  rows: LedgerRowLite[],
+  probe: boolean,
+  probeTask: string | undefined,
+  probeTimeoutMs: number,
+): QueueEntry[] {
+  const entries: QueueEntry[] = [];
+  for (const plan of approvedBundlePlans(root)) {
+    let names: string[];
+    try {
+      names = readdirSync(plan.dir, { withFileTypes: true })
+        .filter((d) => d.isFile() && TASK_FILE_RE.test(d.name))
+        .map((d) => d.name)
+        .sort();
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const taskPath = join(plan.dir, name);
+      const ref = taskRef(taskPath);
+      // Fora do padrão PLAN-NNNN/TASK-NN: não é entrada de fila do bundle.
+      if (!ref.includes("/")) continue;
+
+      const parsed = parsePlan(readFileSync(taskPath, "utf8"));
+      const receipt = latestReceipt(rows, ref);
+      const lease = readLeaseAt(taskSidecarDir(taskPath));
+      const shouldProbe =
+        probe &&
+        (probeTask === undefined || normalizeTask(probeTask) === normalizeTask(ref));
+      const doneWhenExit =
+        parsed.ok && shouldProbe
+          ? probeDoneWhen(root, parsed.plan.done_when, probeTimeoutMs)
+          : null;
+
+      entries.push({
+        task: ref,
+        plan_path: relative(root, taskPath),
+        state: resolveState({
+          planOk: parsed.ok,
+          doneWhenExit,
+          receipt,
+          rows,
+          task: ref,
+          lease,
+        }),
+        goal: parsed.ok ? parsed.plan.goal : null,
+        reason_code: receipt?.reason_code ?? null,
+        receipt: receipt === null ? null : { seq: receipt.seq, status: receipt.status },
+        plan_errors: parsed.ok ? [] : parsed.errors,
+        lease,
+        done_when_exit: doneWhenExit,
+        plan: plan.ref,
+        blocked_by: parsed.ok
+          ? pendingDeps(parsed.plan.depends_on ?? [], plan.ref, rows)
+          : [],
+      });
+    }
+  }
+  return entries;
 }
 
 export function scanQueue(
@@ -236,8 +448,12 @@ export function scanQueue(
     ledgerPath = opts.ledgerPath;
   }
 
+  // Escopo do repo (T79): nada casa receipt de outro git antes de classificar.
+  rows = rowsInRepoScope(rows, root);
+
   const report: QueueReport = {
     v: QUEUE_VERSION,
+    schema_version: QUEUE_SCHEMA_VERSION,
     root,
     ledger: ledgerPath,
     provenance: {
@@ -249,82 +465,75 @@ export function scanQueue(
     tasks: [],
   };
 
-  if (!existsSync(tasksDir)) return report;
+  const addEntry = (entry: QueueEntry): void => {
+    report.counts[entry.state] += 1;
+    report.tasks.push(entry);
+  };
 
-  const dirs = readdirSync(tasksDir, { withFileTypes: true })
-    .filter((d) => d.isDirectory())
-    .map((d) => d.name);
+  if (existsSync(tasksDir)) {
+    const dirs = readdirSync(tasksDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
 
-  for (const task of sortTasks(dirs.map((task) => ({ task }))).map((d) => d.task)) {
-    const planPath = join(tasksDir, task, "PLAN.md");
-    if (!existsSync(planPath)) continue;
+    for (const task of sortTasks(dirs.map((task) => ({ task }))).map((d) => d.task)) {
+      const planPath = join(tasksDir, task, "PLAN.md");
+      if (!existsSync(planPath)) continue;
 
-    const parsed = parsePlan(readFileSync(planPath, "utf8"));
-    const receipt = latestReceipt(rows, task);
-    const lease = readLease(root, task);
-    const planErrors = parsed.ok ? [] : parsed.errors;
-
-    let state: QueueState;
-    let doneWhenExit: number | null = null;
-
-    if (!parsed.ok) {
-      state = "invalid_plan";
-    } else {
+      const parsed = parsePlan(readFileSync(planPath, "utf8"));
+      const receipt = latestReceipt(rows, task);
+      const lease = readLease(root, task);
       const shouldProbe =
         opts.probe === true &&
         (opts.probeTask === undefined || normalizeTask(opts.probeTask) === normalizeTask(task));
-      if (shouldProbe) {
-        doneWhenExit = probeDoneWhen(root, parsed.plan.done_when, probeTimeoutMs);
-      }
-      if (doneWhenExit === 0) {
-        state = receipt?.status === "pass" ? "done" : "awaiting_receipt";
-      } else if (receipt?.status === "pass") {
-        state = "done";
-      } else if (
-        receipt?.status === "blocked" &&
-        receipt.reason_code === "superseded"
-      ) {
-        // Fechada pelo operador: contrato já satisfeito no base, sem trabalho
-        // nesta fatia. Nunca vira `pass`; sai da fila e não é reexecutada.
-        state = "superseded";
-      } else if (
-        receipt?.status === "blocked" &&
-        PROCEDURAL_REASON_CODES.has(receipt.reason_code ?? "") &&
-        hasPassReceipt(rows, task)
-      ) {
-        // O contrato já foi provado por um `pass` anterior; o recibo posterior é
-        // ruído processual (juiz sem atestação, infra, guarda de delta).
-        state = "done";
-      } else if (receipt?.status === "blocked") {
-        state = "blocked";
-      } else if (lease?.alive === true) {
-        state = "leased";
-      } else {
-        // fail/not run/ausente => retomável
-        state = "open";
-      }
-    }
+      const doneWhenExit =
+        parsed.ok && shouldProbe
+          ? probeDoneWhen(root, parsed.plan.done_when, probeTimeoutMs)
+          : null;
 
-    report.counts[state] += 1;
-    report.tasks.push({
-      task,
-      plan_path: `tasks/${task}/PLAN.md`,
-      state,
-      goal: parsed.ok ? parsed.plan.goal : null,
-      reason_code: receipt?.reason_code ?? null,
-      receipt: receipt === null ? null : { seq: receipt.seq, status: receipt.status },
-      plan_errors: planErrors,
-      lease,
-      done_when_exit: doneWhenExit,
-    });
+      addEntry({
+        task,
+        plan_path: `tasks/${task}/PLAN.md`,
+        state: resolveState({
+          planOk: parsed.ok,
+          doneWhenExit,
+          receipt,
+          rows,
+          task,
+          lease,
+        }),
+        goal: parsed.ok ? parsed.plan.goal : null,
+        reason_code: receipt?.reason_code ?? null,
+        receipt: receipt === null ? null : { seq: receipt.seq, status: receipt.status },
+        plan_errors: parsed.ok ? [] : parsed.errors,
+        lease,
+        done_when_exit: doneWhenExit,
+        plan: null,
+        blocked_by: [],
+      });
+    }
+  }
+
+  // Bundle `.ginga/plans/PLAN-*/TASK-*.md`: convive com o legado `tasks/T*`.
+  for (const entry of scanBundle(
+    root,
+    rows,
+    opts.probe === true,
+    opts.probeTask,
+    probeTimeoutMs,
+  )) {
+    addEntry(entry);
   }
 
   return report;
 }
 
-/** Próxima task executável: menor número em `open`; depois `awaiting_receipt`. */
+/**
+ * Próxima task executável: menor número em `open`; depois `awaiting_receipt`.
+ * TASK com `depends_on` pendente (`blocked_by`) não é executável: a dependente
+ * espera o `pass` da dep, mesmo quando vem primeiro na ordem numérica.
+ */
 export function nextTask(entries: QueueEntry[]): QueueEntry | null {
-  const ordered = sortTasks(entries);
+  const ordered = sortTasks(entries).filter((e) => e.blocked_by.length === 0);
   return (
     ordered.find((e) => e.state === "open") ??
     ordered.find((e) => e.state === "awaiting_receipt") ??
@@ -342,7 +551,34 @@ export function canClaim(state: QueueState): boolean {
 }
 
 export function baselinePath(root: string, task: string): string {
-  return join(root, "tasks", task, ".baseline.json");
+  if (task.includes("/")) {
+    // Novo ref PLAN-NNNN/TASK-NN: o ref não guarda o sufixo do slug da pasta
+    // do PLAN, então ela é descoberta em `.ginga/plans`.
+    const [planRef, taskName] = task.split("/");
+    const plansDir = join(root, ".ginga", "plans");
+    let planDir = join(plansDir, planRef);
+    try {
+      const match = readdirSync(plansDir, { withFileTypes: true })
+        .filter(
+          (d) =>
+            d.isDirectory() &&
+            (d.name === planRef || d.name.startsWith(`${planRef}-`)),
+        )
+        .map((d) => d.name)
+        .sort()[0];
+      if (match !== undefined) planDir = join(plansDir, match);
+    } catch {
+      // sem .ginga/plans: mantém o caminho canônico
+    }
+    return join(
+      taskSidecarDir(join(planDir, `${taskName}.md`)),
+      ".baseline.json",
+    );
+  }
+  return join(
+    taskSidecarDir(join(root, "tasks", task, "PLAN.md")),
+    ".baseline.json",
+  );
 }
 
 export type ClaimBaseline = {

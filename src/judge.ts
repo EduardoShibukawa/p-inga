@@ -6,6 +6,7 @@ import { attestFromEndpoint, attestFromTranscript, modelFamily } from "./family"
 import { findRedBase } from "./guards";
 import { defaultLedgerPath, openLedger, type Ledger } from "./ledger";
 import { parsePlan } from "./plan";
+import { resolveRepoRoot } from "./prove";
 import type { Attestation, Receipt, Status, ReasonCode } from "./receipt";
 import { receiptKind } from "./receipt";
 import { NOT_RUN_TOKENS, type TokenFields } from "./tokens";
@@ -23,8 +24,12 @@ export const JUDGE_PROMPT_VERSION = 1;
 export type JudgeOptions = {
   ledgerPath?: string;
   judgeModel?: string;
+  plannerModel?: string;
+  verdict?: string;
   endpoint?: string;
   base?: string;
+  /** T65: raiz do repo-alvo quando o PLAN/TASK vive fora dele. */
+  root?: string;
   usageFile?: string;
 };
 
@@ -166,13 +171,12 @@ export async function judgePlan(
   const dir = dirname(resolvedPlan);
   const task = basename(dir);
 
-  const gitRoot = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
-    cwd: dir,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const repoRoot =
-    gitRoot.exitCode === 0 ? gitRoot.stdout.toString().trim() : dir;
+  const rootRes = resolveRepoRoot(resolvedPlan, opts?.root);
+  if (!rootRes.ok) {
+    console.error(rootRes.error);
+    return 2;
+  }
+  const repoRoot = rootRes.root;
 
   // 1. Plano inválido → exit 3, sem recibo.
   let plan;
@@ -265,6 +269,150 @@ export async function judgePlan(
         }),
       );
       return JUDGE_EXIT.model_unattested;
+    }
+
+    // Modo externo (--verdict): sela um veredito produzido fora do pinga.
+    if (opts?.verdict) {
+      let content = "";
+      try {
+        content = readFileSync(opts.verdict, "utf8");
+      } catch (err) {
+        console.error(`veredito ilegível: ${opts.verdict}`);
+        return JUDGE_EXIT.infra;
+      }
+      const verdictRes = parseVerdict(content);
+      if (!verdictRes.ok) {
+        console.error(`veredito inválido: ${verdictRes.error}`);
+        emit(
+          ledger,
+          judgeReceipt({
+            task,
+            status: "not run",
+            reason_code: "infra",
+            attempts,
+            evidence: [],
+            tokenFields,
+            author,
+            verified_by: null,
+            summary: `${task} not run: veredito externo inválido (${verdictRes.error})`.slice(0, 280),
+          }),
+        );
+        return JUDGE_EXIT.infra;
+      }
+
+      const claimedJudge = opts?.judgeModel ?? process.env.PINGA_JUDGE_MODEL ?? null;
+      if (!claimedJudge) {
+        emit(
+          ledger,
+          judgeReceipt({
+            task,
+            status: "blocked",
+            reason_code: "model_unattested",
+            attempts,
+            evidence: [],
+            tokenFields,
+            author,
+            verified_by: null,
+            summary: `${task} blocked: modelo do juiz não atestado`,
+          }),
+        );
+        return JUDGE_EXIT.model_unattested;
+      }
+
+      // Atestação obrigatória do juiz externo: transcript (usage file) ou endpoint.
+      const usagePath = opts?.usageFile ?? process.env.PINGA_USAGE_FILE;
+      let attested: import("./receipt").Attestation | null = null;
+      if (usagePath) {
+        try {
+          const tRes = attestFromTranscript(readFileSync(usagePath, "utf8"), claimedJudge);
+          if (tRes.ok) attested = tRes.attested;
+        } catch {
+          // transcript ilegível: cai no endpoint
+        }
+      }
+      if (attested === null) {
+        emit(
+          ledger,
+          judgeReceipt({
+            task,
+            status: "blocked",
+            reason_code: "model_unattested",
+            attempts,
+            evidence: [],
+            tokenFields,
+            author,
+            verified_by: null,
+            summary: `${task} blocked: modelo do juiz não atestado (transcript ausente ou inválido)`,
+          }),
+        );
+        return JUDGE_EXIT.model_unattested;
+      }
+
+      const judgeModel = attested.served;
+      const judgeFamily = modelFamily(judgeModel);
+
+      const distExec = assertDistinctFamily(execFamily, judgeFamily);
+      if (!distExec.ok) {
+        emit(
+          ledger,
+          judgeReceipt({
+            task,
+            status: "blocked",
+            reason_code: distExec.reason_code,
+            attempts,
+            evidence: [],
+            tokenFields,
+            author,
+            verified_by: null,
+            summary: `${task} blocked: juiz ${judgeModel} é da mesma família do executor (${judgeFamily})`.slice(0, 280),
+            model_attested: attested,
+          }),
+        );
+        return JUDGE_EXIT[distExec.reason_code];
+      }
+
+      const plannerModel = opts?.plannerModel ?? process.env.PINGA_PLANNER_MODEL ?? null;
+      if (plannerModel) {
+        const plannerFamily = modelFamily(plannerModel);
+        const distPlan = assertDistinctFamily(plannerFamily, judgeFamily);
+        if (!distPlan.ok) {
+          emit(
+            ledger,
+            judgeReceipt({
+              task,
+              status: "blocked",
+              reason_code: distPlan.reason_code,
+              attempts,
+              evidence: [],
+              tokenFields,
+              author,
+              verified_by: null,
+              summary: `${task} blocked: juiz ${judgeModel} é da mesma família do planner (${judgeFamily})`.slice(0, 280),
+              model_attested: attested,
+            }),
+          );
+          return JUDGE_EXIT[distPlan.reason_code];
+        }
+      }
+
+      const status = verdictRes.verdict === "pass" ? "pass" : "fail";
+      const reason_code = status === "pass" ? null : "judge_rejected";
+      emit(
+        ledger,
+        judgeReceipt({
+          task,
+          status,
+          reason_code,
+          attempts,
+          evidence: [],
+          tokenFields,
+          author,
+          verified_by: { model: judgeModel, family: judgeFamily },
+          summary: `${task} ${status}: juiz externo ${judgeModel} (${judgeFamily})`.slice(0, 280),
+          model_attested: attested,
+        }),
+      );
+      return status === "pass" ? JUDGE_EXIT.pass : JUDGE_EXIT.judge_rejected;
     }
 
     // 6. Juiz: atestado obrigatório pelo endpoint (I11).

@@ -4,12 +4,10 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "
 import { judgePlan } from "./judge";
 import { modePlan } from "./mode";
 import { isProvisionalTest, precommitDecision } from "./guards";
-import { ADAPTER_ORDER, installCmd } from "./install";
 import { defaultLedgerPath, openLedger } from "./ledger";
-import { defaultManifestPath, type Harness } from "./manifest";
-import { adoptLocalEntries } from "./adopt";
 import { provePlan } from "./prove";
 import { verifyPlan } from "./verify";
+import { isPlanDoc, verifyPlanDoc } from "./plan_verify";
 import { doctorCmd } from "./doctor";
 import { defaultLearnDbPath, ingest, ingestMultiHarness, LEARN_EXIT, openLearnDb } from "./learn";
 import { promoteCmd, proposeCmd } from "./lessons";
@@ -25,6 +23,7 @@ import {
 import { compactContext } from "./compact";
 import { evaluateDocument, renderScorecardMarkdown } from "./docs_eval";
 import { notifyDigest, sendDiscordMessage } from "./discord";
+import { emitNoticeEvent } from "./events";
 import {
   canClaim,
   claim,
@@ -42,11 +41,11 @@ import { supersedeTask } from "./supersede";
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga queue [--json] [--notify] [--root DIR] [--ledger PATH] [--claim [TASK] [--ttl S]] [--release TASK]
                    [--probe TASK | --probe-all] [--probe-timeout S]
-       pinga verify <PLAN.md> [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base] [--no-baseline] [--require-delta] [--allow-no-delta] [--allow-verifier-drift]
+       pinga verify <PLAN.md> [--root PATH] [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base] [--no-baseline] [--require-delta] [--allow-no-delta] [--allow-verifier-drift]
        pinga supersede <TASK> --reason TEXTO [--ledger PATH] [--timeout S]
-       pinga prove-red <PLAN.md> [--ledger PATH] [--base SHA]
+       pinga prove-red <PLAN.md> [--root PATH] [--ledger PATH] [--base SHA]
        pinga mode <PLAN.md> [--base SHA] [--override-mode M --reason TEXTO]
-       pinga judge <PLAN.md> [--ledger PATH] [--judge-model M] [--endpoint URL] [--base SHA] [--usage-file PATH]
+       pinga judge <PLAN.md> [--root PATH] [--ledger PATH] [--judge-model M] [--planner-model P] [--verdict F] [--endpoint URL] [--base SHA] [--usage-file PATH]
        pinga eval <PLAN.md> [--ledger PATH] [--check]
        pinga examples <PLAN.md> --from PATH
        pinga learn ingest [--ledger PATH] [--evals DIR] [--sessions DIR] [--db PATH] [--repo NOME] [--denylist PATH]
@@ -56,8 +55,7 @@ const USAGE = `usage: pinga ledger verify [--ledger PATH]
        pinga learn promote <PROPOSED.md> --id <L-…> --to <LESSONS.md> [--by NOME]
        pinga learn audit [--db PATH] [--repo PATH] [--sample N] [--threshold T] [--json]
        pinga precommit [-- <cmd...>]
-       pinga install (--dry-run | --apply | --revert | --rebaseline) [--only H] [--manifest PATH] [--home PATH]
-       pinga adopt (--dry-run | --apply) [--home PATH] [--manifest PATH]
+       pinga install | pinga adopt  ->  movido para ginga install (exit 2)
        pinga doctor [--json] [--only H] [--endpoint URL] [--home PATH] [--manifest PATH]
        pinga tdd list
        pinga maestro scoreboard [--ledger PATH] [--db PATH] [--json]
@@ -418,10 +416,17 @@ export async function runCli(argv: string[]): Promise<number> {
     }
 
     if (has("--notify") && notice !== null) {
-      const sent = await notifyDigest(notice);
-      if (!sent) {
-        console.error("notify: falha ao enviar o aviso para o Discord");
-        return 1;
+      // A4 (PLAN-0010 TASK-06): com $GINGA_EVENTS o aviso acionável vira
+      // evento (kind blocker) para o Ginga rotear; sem a porta, fallback
+      // para o Discord como antes.
+      if (process.env.GINGA_EVENTS) {
+        emitNoticeEvent(notice);
+      } else {
+        const sent = await notifyDigest(notice);
+        if (!sent) {
+          console.error("notify: falha ao enviar o aviso para o Discord");
+          return 1;
+        }
       }
     }
     return 0;
@@ -463,6 +468,7 @@ export async function runCli(argv: string[]): Promise<number> {
     let ledgerPath: string | undefined;
     let attempt: number | undefined;
     let base: string | undefined;
+    let root: string | undefined;
     let usageFile: string | undefined;
     let overrideMode: string | undefined;
     let reason: string | undefined;
@@ -507,6 +513,14 @@ export async function runCli(argv: string[]): Promise<number> {
         }
         base = value;
         i++;
+      } else if (arg === "--root") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "" || value.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        root = value;
+        i++;
       } else if (arg === "--usage-file") {
         const value = rest[i + 1];
         if (value === undefined || value === "" || value.startsWith("--")) {
@@ -539,8 +553,19 @@ export async function runCli(argv: string[]): Promise<number> {
       }
     }
 
+    // Documento `type: plan` (bundle PLAN-NNNN/TASK-NN): integração própria —
+    // exige pass de todas as TASKs e roda o done_when do PLAN. O parse de TASK
+    // não o aceita, então o desvio acontece antes do verifyPlan.
+    if (isPlanDoc(planPath)) {
+      return verifyPlanDoc(planPath, ledgerPath, attempt, {
+        root,
+        usageFile,
+      });
+    }
+
     return verifyPlan(planPath, ledgerPath, attempt, {
       base,
+      root,
       usageFile,
       overrideMode,
       reason,
@@ -562,7 +587,12 @@ export async function runCli(argv: string[]): Promise<number> {
       console.error(USAGE);
       return 2;
     }
-    const planPath = `tasks/${taskArg.trim().toUpperCase()}/PLAN.md`;
+    const arg = taskArg.trim();
+    // Aceita o id legado (T<N>) ou o caminho de um PLAN/TASK já no formato novo.
+    const planPath =
+      arg.includes("/") || /\.md$/i.test(arg)
+        ? arg
+        : `tasks/${arg.toUpperCase()}/PLAN.md`;
     let reason: string | undefined;
     let ledgerPath: string | undefined;
     let timeoutMs: number | undefined;
@@ -616,6 +646,7 @@ export async function runCli(argv: string[]): Promise<number> {
 
     let ledgerPath: string | undefined;
     let base: string | undefined;
+    let root: string | undefined;
 
     for (let i = 0; i < rest.length; i++) {
       const arg = rest[i];
@@ -626,6 +657,14 @@ export async function runCli(argv: string[]): Promise<number> {
           return 2;
         }
         ledgerPath = value;
+        i++;
+      } else if (arg === "--root") {
+        const value = rest[i + 1];
+        if (value === undefined || value === "" || value.startsWith("--")) {
+          console.error(USAGE);
+          return 2;
+        }
+        root = value;
         i++;
       } else if (arg === "--base") {
         const value = rest[i + 1];
@@ -641,7 +680,7 @@ export async function runCli(argv: string[]): Promise<number> {
       }
     }
 
-    return provePlan(planPath, { ledgerPath, base });
+    return provePlan(planPath, { ledgerPath, base, root });
   }
 
   if (command === "mode") {
@@ -699,15 +738,21 @@ export async function runCli(argv: string[]): Promise<number> {
 
     let ledgerPath: string | undefined;
     let judgeModel: string | undefined;
+    let plannerModel: string | undefined;
+    let verdict: string | undefined;
     let endpoint: string | undefined;
     let base: string | undefined;
+    let root: string | undefined;
     let usageFile: string | undefined;
 
     const valueFlags = new Set([
       "--ledger",
       "--judge-model",
+      "--planner-model",
+      "--verdict",
       "--endpoint",
       "--base",
+      "--root",
       "--usage-file",
     ]);
 
@@ -721,8 +766,11 @@ export async function runCli(argv: string[]): Promise<number> {
         }
         if (arg === "--ledger") ledgerPath = value;
         else if (arg === "--judge-model") judgeModel = value;
+        else if (arg === "--planner-model") plannerModel = value;
+        else if (arg === "--verdict") verdict = value;
         else if (arg === "--endpoint") endpoint = value;
         else if (arg === "--base") base = value;
+        else if (arg === "--root") root = value;
         else if (arg === "--usage-file") usageFile = value;
         i++;
       } else {
@@ -731,7 +779,7 @@ export async function runCli(argv: string[]): Promise<number> {
       }
     }
 
-    return judgePlan(planPath, { ledgerPath, judgeModel, endpoint, base, usageFile });
+    return judgePlan(planPath, { ledgerPath, judgeModel, plannerModel, verdict, endpoint, base, root, usageFile });
   }
 
   if (command === "eval") {
@@ -798,110 +846,9 @@ export async function runCli(argv: string[]): Promise<number> {
     return examplesPlan(planPath, { from });
   }
 
-  if (command === "install") {
-    const modes = new Set<string>();
-    let home: string | undefined;
-    let manifestPath: string | undefined;
-    let only: string | undefined;
-
-    // O primeiro argumento cai em `subcommand`; o modo pode estar em
-    // qualquer posição.
-    const args = [subcommand, ...rest].filter((a) => a !== undefined);
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      if (arg === "--dry-run" || arg === "--apply" || arg === "--revert" || arg === "--rebaseline") {
-        modes.add(arg);
-      } else if (arg === "--home" || arg === "--manifest" || arg === "--only") {
-        const value = args[i + 1];
-        if (value === undefined || value === "") {
-          console.error(USAGE);
-          return 2;
-        }
-        i++;
-        if (arg === "--home") home = value;
-        else if (arg === "--manifest") manifestPath = value;
-        else only = value;
-      } else {
-        console.error(USAGE);
-        return 2;
-      }
-    }
-
-    if (modes.size !== 1) {
-      console.error(USAGE);
-      return 2;
-    }
-
-    const resolvedHome = home ?? process.env.HOME;
-    if (resolvedHome === undefined || !existsSync(resolvedHome)) {
-      console.error(USAGE);
-      return 2;
-    }
-
-    const mode = modes.has("--dry-run")
-      ? ("dry-run" as const)
-      : modes.has("--apply")
-        ? ("apply" as const)
-        : modes.has("--rebaseline")
-          ? ("rebaseline" as const)
-          : ("revert" as const);
-    return installCmd({
-      mode,
-      home: resolvedHome,
-      manifestPath,
-      only: only as Harness | undefined,
-      env: process.env,
-    });
-  }
-
-  if (command === "adopt") {
-    const modes = new Set<string>();
-    let home: string | undefined;
-    let manifestPath: string | undefined;
-
-    const args = [subcommand, ...rest].filter((a) => a !== undefined);
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      if (arg === "--dry-run" || arg === "--apply") {
-        modes.add(arg);
-      } else if (arg === "--home" || arg === "--manifest") {
-        const value = args[i + 1];
-        if (value === undefined || value === "") {
-          console.error(USAGE);
-          return 2;
-        }
-        i++;
-        if (arg === "--home") home = value;
-        else manifestPath = value;
-      } else {
-        console.error(USAGE);
-        return 2;
-      }
-    }
-
-    if (modes.size !== 1) {
-      console.error(USAGE);
-      return 2;
-    }
-
-    const resolvedHome = home ?? process.env.HOME;
-    if (resolvedHome === undefined || !existsSync(resolvedHome)) {
-      console.error(USAGE);
-      return 2;
-    }
-
-    const env = process.env;
-    const resolvedManifest = manifestPath ?? defaultManifestPath(env);
-
-    const apply = modes.has("--apply");
-    await adoptLocalEntries({
-      homeDir: resolvedHome,
-      manifestPath: resolvedManifest,
-      apply,
-    });
-    return 0;
+  if (command === "install" || command === "adopt") {
+    console.error("pinga install e pinga adopt foram movidos para `ginga install` (bundle do workspace)");
+    return 2;
   }
 
   if (command === "doctor") {
@@ -945,7 +892,6 @@ export async function runCli(argv: string[]): Promise<number> {
 
     if (
       only !== undefined &&
-      !(ADAPTER_ORDER as readonly string[]).includes(only) &&
       only !== "llm" &&
       only !== "manifest"
     ) {
@@ -1097,6 +1043,15 @@ export async function runCli(argv: string[]): Promise<number> {
         }
       }
 
+      try {
+        const { MIGRATION_NOTICE } = await import("./lessons_migrado");
+        console.error(MIGRATION_NOTICE);
+      } catch {
+        console.error(
+          "aviso: lições migraram para o ginga (ginga lessons import / ginga learning promote)",
+        );
+      }
+
       return proposeCmd({
         db,
         out,
@@ -1142,6 +1097,15 @@ export async function runCli(argv: string[]): Promise<number> {
       if (proposals === undefined || id === undefined || to === undefined) {
         console.error(USAGE);
         return 2;
+      }
+
+      try {
+        const { MIGRATION_NOTICE } = await import("./lessons_migrado");
+        console.error(MIGRATION_NOTICE);
+      } catch {
+        console.error(
+          "aviso: lições migraram para o ginga (ginga lessons import / ginga learning promote)",
+        );
       }
 
       return promoteCmd({ proposals, id, to, by, env: process.env });
@@ -1640,6 +1604,13 @@ export async function runCli(argv: string[]): Promise<number> {
     if (!message) {
       console.error(USAGE);
       return 2;
+    }
+    // A4 (PLAN-0010 TASK-06): com a porta de eventos ligada, o pinga só
+    // emite (kind blocker); o Discord passa a ser responsabilidade do Ginga.
+    if (process.env.GINGA_EVENTS) {
+      emitNoticeEvent(message);
+      console.log("ok");
+      return 0;
     }
     const res = await sendDiscordMessage(message);
     if (!res.ok) {

@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { canonicalJson } from "./canonical";
 import { validateReceipt } from "./receipt";
+import { emitReceiptEvent } from "./events";
 
 export const GENESIS = "0".repeat(64);
 
@@ -108,7 +109,13 @@ export function openLedger(path: string): Ledger {
         res.receipt.created_at,
       );
 
-      return { seq: Number(info.lastInsertRowid), hash };
+      const result = { seq: Number(info.lastInsertRowid), hash };
+      try {
+        emitReceiptEvent(res.receipt, result);
+      } catch {
+        // falha ao emitir evento nunca falha o append
+      }
+      return result;
     },
 
     all() {

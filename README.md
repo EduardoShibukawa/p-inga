@@ -13,6 +13,10 @@ mise install          # fixa Bun 1.4.4 e hk
 bun bin/pinga.ts doctor
 ```
 
+A instalação do harness nos harnesses (skills, plugins, PATH) foi movida para
+`ginga install` (bundle do workspace). `pinga install` e `pinga adopt` saem com
+exit 2 apontando para lá.
+
 Nada é coletado por padrão: dados brutos e estado local ficam fora do
 versionamento — só entram código, specs, tasks e fixtures sintéticas em
 `testdata/`.

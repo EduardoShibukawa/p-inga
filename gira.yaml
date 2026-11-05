@@ -8,3 +8,87 @@ repositories:
       ref: main
       sha: f91d05a5740e971efa42f1855723b34c71dadffd
       path_scope: .
+docsite:
+    title: P-Ingá
+    tour:
+        - title: Harness Validation & System Health
+          domain: Getting Started
+          description: Audit local harnesses, toolchain prerequisites, and sandbox configurations for P-Ingá. Runs the comprehensive health doctor to verify dependencies and ledger state.
+          invariants:
+            - "Hermetic Toolchain: Mise-managed runtimes ensure identical Bun and TypeScript execution environments."
+            - "Sandbox Isolation: Git worktree boundaries prevent accidental host pollution or untracked changes."
+          key_files: [README.md, gira.yaml, package.json, mise.toml]
+          sample_cmd: bun .pinga/pinga-stable doctor
+          snippet: |-
+            # Verify local toolchain and environment health
+            bun .pinga/pinga-stable doctor
+        - title: Task Contracts & Formal Proofs
+          domain: Contract Verification
+          description: Every operational change is defined as a formal PLAN.md contract with strict done_when verification criteria and 25-line limits under RED-then-EXEC proofing.
+          invariants:
+            - "25-Line Bound: PLAN.md contracts must remain concise to enforce single-responsibility tasks."
+            - "RED-then-EXEC Proofing: Tasks must prove failure against baseline before code changes are verified."
+          key_files: [src/verify.ts, src/plan.ts, tasks/T33/PLAN.md]
+          sample_cmd: bun .pinga/pinga-stable verify tasks/T33/PLAN.md
+          snippet: |-
+            # Verify task contract with RED-then-EXEC proofing
+            bun .pinga/pinga-stable verify tasks/T33/PLAN.md
+        - title: Cryptographic Ledger & Block Receipts
+          domain: Audit & Integrity
+          description: Seals verified execution receipts into an append-only, SHA-256 hash-chained SQLite ledger. Prevents retroactive tampering and guarantees reproducibility.
+          invariants:
+            - "Immutable Hash Chain: Historical blocks cannot be modified or truncated without invalidating hashes."
+            - "Cryptographic Provenance: Records exact stdout/stderr digests, exit status, and timestamps."
+          key_files: [src/ledger.ts, src/receipt.ts, ledger.db]
+          sample_cmd: bun .pinga/pinga-stable ledger verify
+          snippet: |-
+            # Verify cryptographic integrity of the entire ledger chain
+            bun .pinga/pinga-stable ledger verify
+        - title: Operational Observability & Discord Bridge
+          domain: Integration & Surfaces
+          description: Delivers verified receipts directly to Discord #hermes and serves interactive telemetry and control via web dashboard.
+          invariants:
+            - "Real-Time Telemetry: Execution events and audit proofs are broadcast to Discord #hermes."
+            - "Fail-Safe Isolation: Network delivery failures do not compromise core task verification."
+          key_files: [src/discord.ts, web/server.ts, web/index.html]
+          sample_cmd: bun test tests/discord.test.ts
+          snippet: |-
+            # Run Discord telemetry integration test suite
+            bun test tests/discord.test.ts
+        - title: Living Architecture & Visual Topology
+          domain: Living Architecture
+          description: Explore the live dependency graph and architectural communities extracted deterministically from source code.
+          invariants:
+            - "Continuous Parity: Living documentation updates automatically on every push to main."
+            - "Deterministic AST Extraction: Node topology reflects exact TypeScript symbol declarations."
+          key_files: [build/architecture/graph.html, build/architecture/index.html]
+          sample_cmd: open build/architecture/graph.html
+          snippet: |-
+            # Explore interactive Cytoscape topology
+            open build/architecture/graph.html
+    workflows:
+        - title: Verify a task contract
+          description: Prove RED on the baseline, then verify the PLAN.md contract and seal the receipt.
+          command: bun .pinga/pinga-stable verify tasks/T33/PLAN.md
+        - title: Audit the ledger
+          description: Check the hash chain of the append-only ledger end to end.
+          command: bun .pinga/pinga-stable ledger verify
+        - title: Explore the architecture graph
+          description: Open the interactive topology generated from source.
+          command: open architecture/graph.html
+    pillars:
+        - icon: ⚖️
+          title: Contract Prover & Verification
+          description: Enforces formal PLAN.md task specifications, 25-line contracts, and RED-then-EXEC validation runs before sealing receipts.
+        - icon: 🔒
+          title: Cryptographic Ledger & Audit
+          description: Append-only SQLite ledger storing hash-chained block receipts with SHA-256 signatures for tamper-evident reproducibility.
+        - icon: 🛡️
+          title: Safety Breakers & Diagnostics
+          description: Circuit breakers protecting against runaway execution loops, uncommitted workspace pollution, and unverified mutations.
+        - icon: 📡
+          title: Discord Bridge & Observability
+          description: Live notification pipeline delivering verified task receipts and execution alerts directly to #hermes Discord channels.
+        - icon: 📊
+          title: Interactive Operations Dashboard
+          description: Web dashboard and control plane for monitoring system state, live metrics, and ledger blocks in real time.

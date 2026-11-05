@@ -2,9 +2,10 @@ import { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { defaultLedgerPath, GENESIS, openLedger } from "./ledger";
 import { parsePlan } from "./plan";
+import { taskRef } from "./task_ref";
 import { repoFromCwd } from "./transcript";
 
 export const MAX_ENVELOPE_BYTES = 4096;
@@ -146,9 +147,9 @@ export function createTaskRequest(
       if (data && typeof data.id === "string") {
         id = data.id;
       } else {
-        const dir = basename(dirname(resolve(planPath)));
-        if (/^T\d+/.test(dir)) {
-          id = dir;
+        const ref = taskRef(resolve(planPath));
+        if (/^T\d+/.test(ref) || ref.includes("/")) {
+          id = ref;
         } else {
           id = `task-${randomUUID().slice(0, 8)}`;
         }

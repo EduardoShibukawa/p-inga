@@ -27,7 +27,7 @@ This repository contains **P-Ingá**, the formal verification harness enforcing 
 - `pinga verify <PLAN.md>` — Execute contract, record tokens, sign receipt, append to ledger.
 - `pinga prove-red <PLAN.md>` — Prove test failure on base commit.
 - `pinga ledger verify` — Verify SHA256 chain integrity of ledger.db.
-- `pinga doctor` — Check health of multi-harness adapters (Claude, Pi, OpenCode, Hermes, TUIOS).
+- `pinga doctor` — Check manifest integrity and the LLM endpoint (a instalação dos harnesses vive no `ginga install`).
 - `pinga maestro scoreboard` — Display token efficiency & FTPR metrics.
 - `bun test` — Run full repository test suite.
 

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import {
   BREAKER_EXIT,
   BREAKER_NEXT_ACTION,
@@ -12,6 +12,7 @@ import {
 } from "./breaker";
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { notifyReceipt } from "./discord";
+import { WRAPPER_UNAVAILABLE_EXIT, doneWhenArgv, wrapperProblem } from "./exec";
 import { OVERFIT_EXIT, holdoutRunnerPath, runHoldout } from "./examples";
 import { applyBaseline, changedFiles, evaluateGuards, findRedBase } from "./guards";
 import type { DriftBaseline } from "./guards";
@@ -19,7 +20,8 @@ import type { ClaimBaseline } from "./queue";
 import { currentBranch, parseOverride, resolveMode } from "./mode";
 import type { ModeDecision } from "./mode";
 import { parsePlan } from "./plan";
-import { PROVE_EXIT, proveBase } from "./prove";
+import { PROVE_EXIT, proveBase, resolveRepoRoot } from "./prove";
+import { taskRef, taskSidecarDir } from "./task_ref";
 import type { ReasonCode, Receipt, Status } from "./receipt";
 import { resolveUsageFile, tokenFieldsFor } from "./tokens";
 import type { TokenFields } from "./tokens";
@@ -68,6 +70,8 @@ export type VerifyOptions = {
   allowNoDelta?: boolean;
   /** T59: opt-in estreito — libera scope_drift só nos arquivos do verifier. */
   allowVerifierDrift?: boolean;
+  /** T65: raiz do repo-alvo quando o PLAN/TASK vive fora dele. */
+  root?: string;
   usageFile?: string;
   overrideMode?: string;
   reason?: string;
@@ -94,20 +98,23 @@ export function verifyPlan(
     console.error(`Erro: arquivo de plano não encontrado em ${resolvedPlanPath}`);
     return 3;
   }
-  const task = basename(dirname(resolvedPlanPath));
+  const task = taskRef(resolvedPlanPath);
 
-  const gitRoot = Bun.spawnSync(
-    ["git", "rev-parse", "--show-toplevel"],
-    {
-      cwd: dirname(resolvedPlanPath),
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
-  const repoRoot =
-    gitRoot.exitCode === 0
-      ? gitRoot.stdout.toString().trim()
-      : dirname(resolvedPlanPath);
+  const rootRes = resolveRepoRoot(resolvedPlanPath, opts?.root);
+  if (!rootRes.ok) {
+    console.error(rootRes.error);
+    return 2;
+  }
+  const repoRoot = rootRes.root;
+
+  // T71: fail-closed. Com PINGA_EXEC_WRAPPER configurado e inutilizável,
+  // nada roda (nem prova no base, nem done_when) e nada é selado no ledger —
+  // sem sandbox o verifier não atesta execução de coisa alguma.
+  const wrapErr = wrapperProblem();
+  if (wrapErr !== null) {
+    console.error(`verify: ${wrapErr}; nada rodou`);
+    return PROVE_EXIT.infra;
+  }
 
   const parsedOverride = parseOverride(opts?.overrideMode, opts?.reason);
   if (!parsedOverride.ok) {
@@ -187,7 +194,8 @@ export function verifyPlan(
     // Baseline do claim (escrito por `queue --claim`): o drift desta tentativa é
     // o que mudou desde o HEAD do claim, descontando o que já estava sujo e
     // permanece idêntico. `--base` explícito e `--no-baseline` vencem.
-    const baselineFile = join(repoRoot, "tasks", task, ".baseline.json");
+    const sidecarAbs = taskSidecarDir(resolvedPlanPath);
+    const baselineFile = join(sidecarAbs, ".baseline.json");
     let claimBaseline: ClaimBaseline | null = null;
     if (!opts?.noBaseline && existsSync(baselineFile)) {
       try {
@@ -199,6 +207,11 @@ export function verifyPlan(
         // baseline ilegível não afrouxa nada: segue o drift completo
       }
     }
+
+    const sidecarRel = (() => {
+      const rel = relative(repoRoot, sidecarAbs);
+      return rel === "" || rel.startsWith("..") || isAbsolute(rel) ? undefined : rel;
+    })();
 
     const baseSha =
       resolvedBase ?? claimBaseline?.head ?? findRedBase(repoRoot, task);
@@ -242,6 +255,7 @@ export function verifyPlan(
     if (baseSha !== null) {
       const guardRes = evaluateGuards({
         task,
+        sidecar: sidecarRel,
         touch: plan.touch,
         tests_frozen: plan.tests_frozen,
         changed,
@@ -352,7 +366,7 @@ export function verifyPlan(
     }
 
     const t0 = Date.now();
-    const res = Bun.spawnSync(["sh", "-c", plan.done_when], {
+    const res = Bun.spawnSync(doneWhenArgv(plan.done_when, repoRoot), {
       cwd: repoRoot,
       timeout: timeoutMs,
       stdout: "pipe",
@@ -410,6 +424,18 @@ export function verifyPlan(
       evidenceExit = null;
       cliExit = 2;
       summary = normalSummary();
+    } else if (res.exitCode === WRAPPER_UNAVAILABLE_EXIT) {
+      // T71: o sandbox se declarou indisponível (exit 97) — o done_when
+      // não chegou a rodar; o recibo não atesta pass nem fail.
+      status = "blocked";
+      reason_code = "infra";
+      evidenceExit = res.exitCode;
+      cliExit = PROVE_EXIT.infra;
+      summary =
+        `${task} blocked: PINGA_EXEC_WRAPPER saiu 97 (sandbox indisponível); nada rodou fora do wrapper`.slice(
+          0,
+          280,
+        );
     } else if (noTestsRun) {
       status = "blocked";
       reason_code = "no_tests_run";
@@ -450,6 +476,15 @@ export function verifyPlan(
             );
         } else if (hRun.exit === 0) {
           summary = `${normalSummary()} · holdout ok`.slice(0, 280);
+        } else if (hRun.exit === WRAPPER_UNAVAILABLE_EXIT) {
+          status = "blocked";
+          reason_code = "infra";
+          cliExit = PROVE_EXIT.infra;
+          summary =
+            `${task} blocked: holdout saiu 97 (sandbox indisponível); nada atestado`.slice(
+              0,
+              280,
+            );
         } else {
           const sig = computeFailureSignature({
             exit: hRun.exit,
