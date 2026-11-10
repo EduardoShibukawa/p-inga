@@ -29,7 +29,7 @@ function receipt(task: string, repo: string | undefined, flow = "verify", status
     id: `rcpt-${task}-${Math.random()}`,
     task,
     status,
-    reason_code: null,
+    reason_code: status === "pass" ? null : "scope_drift",
     attempts: 1,
     evidence: [],
     tokens: { in: null, out: null, cache: null, source: null },
