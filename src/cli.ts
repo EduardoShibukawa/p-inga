@@ -39,6 +39,7 @@ import {
 import { supersedeTask } from "./supersede";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
+       pinga gate [--root DIR] [--ledger PATH] <TASK...>   (0 = todas com receipt done; 12 = pendente)
        pinga queue [--json] [--notify] [--root DIR] [--ledger PATH] [--claim [TASK] [--ttl S]] [--release TASK]
                    [--probe TASK | --probe-all] [--probe-timeout S]
        pinga verify <PLAN.md> [--root PATH] [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base] [--no-baseline] [--require-delta] [--allow-no-delta] [--allow-verifier-drift]
@@ -298,6 +299,36 @@ async function learnIngestMulti(opts: {
 
 export async function runCli(argv: string[]): Promise<number> {
   const [command, subcommand, ...rest] = argv;
+
+  // `pinga gate <T...>` (T901): gate de merge chamado pelo manda via
+  // `[commands].gate`. 0 = todas com receipt done; 12 = pendente ou ausente.
+  if (command === "gate") {
+    const args = [subcommand, ...rest].filter((a): a is string => typeof a === "string");
+    const flags = new Set(["--root", "--ledger"]);
+    const opts: Record<string, string> = {};
+    const wanted: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i]!;
+      if (flags.has(a)) {
+        const v = args[++i];
+        if (v === undefined) {
+          console.error(USAGE);
+          return 2;
+        }
+        opts[a] = v;
+      } else if (a !== "--json") {
+        wanted.push(a.trim().toUpperCase());
+      }
+    }
+    let pending: string[] = [];
+    if (wanted.length > 0) {
+      const report = scanQueue({ root: opts["--root"] ?? process.cwd(), ledgerPath: opts["--ledger"], probe: false });
+      const state = new Map(report.tasks.map((t) => [t.task, t.state]));
+      pending = wanted.filter((t) => state.get(t) !== "done");
+    }
+    console.log(JSON.stringify({ ok: pending.length === 0, pending }));
+    return pending.length === 0 ? 0 : 12;
+  }
 
   if (command === "queue") {
     const args = [subcommand, ...rest].filter((a): a is string => typeof a === "string");
