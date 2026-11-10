@@ -7,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { defaultLedgerPath, openLedger } from "./ledger";
 import { repoScope } from "./breaker";
@@ -338,14 +338,43 @@ function pendingDeps(
   deps: string[],
   planRef: string,
   rows: LedgerRowLite[],
+  aliasPass?: Map<string, boolean>,
 ): string[] {
   const out: string[] = [];
   for (const dep of deps) {
     const ref = depRef(dep, planRef);
     if (ref === null || out.includes(ref)) continue;
-    if (!hasPassReceipt(rows, ref)) out.push(ref);
+    if (!hasPassReceipt(rows, ref) && aliasPass?.get(ref) !== true) out.push(ref);
   }
   return out;
+}
+
+/**
+ * Alias de receipt (T902): TASK do bundle com `pinga_task: T<N>` foi
+ * materializada pelo `manda red` como `tasks/T<N>/PLAN.md` no repo dela, e é
+ * em `T<N>` que o `pinga verify` sela. Devolve o id e os receipts do ledger
+ * que são do git desse repo (`repo:` da TASK, relativo à raiz; sem `repo:`, a
+ * própria raiz). Repo fora do git não tem escopo: sem alias.
+ */
+function pingaTaskAlias(
+  root: string,
+  taskPath: string,
+  allRows: LedgerRowLite[],
+): { task: string; rows: LedgerRowLite[] } | null {
+  const fm = readFrontmatterData(taskPath);
+  const id = typeof fm?.pinga_task === "string" ? fm.pinga_task.trim() : "";
+  if (!/^T\d+$/i.test(id)) return null;
+  const repo = typeof fm?.repo === "string" && fm.repo.trim() !== "" ? fm.repo.trim() : ".";
+  const scope = repoScope(isAbsolute(repo) ? repo : join(root, repo));
+  if (scope === undefined) return null;
+  const rows = allRows.filter((row) => {
+    try {
+      return (JSON.parse(row.body) as { repo?: unknown }).repo === scope;
+    } catch {
+      return false;
+    }
+  });
+  return { task: id, rows };
 }
 
 /** TASK-*.md do bundle, com estado vindo do ledger e `blocked_by` de `depends_on`. */
@@ -355,9 +384,27 @@ function scanBundle(
   probe: boolean,
   probeTask: string | undefined,
   probeTimeoutMs: number,
+  allRows: LedgerRowLite[] = rows,
 ): QueueEntry[] {
   const entries: QueueEntry[] = [];
-  for (const plan of approvedBundlePlans(root)) {
+  const plans = approvedBundlePlans(root);
+  // 1ª passada: quais refs do bundle já fecharam pelo alias `pinga_task`
+  // (o `depends_on` de outra TASK precisa enxergar isso).
+  const aliasPass = new Map<string, boolean>();
+  for (const plan of plans) {
+    let names: string[] = [];
+    try {
+      names = readdirSync(plan.dir).filter((n) => TASK_FILE_RE.test(n));
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const taskPath = join(plan.dir, name);
+      const alias = pingaTaskAlias(root, taskPath, allRows);
+      if (alias !== null) aliasPass.set(taskRef(taskPath), hasPassReceipt(alias.rows, alias.task));
+    }
+  }
+  for (const plan of plans) {
     let names: string[];
     try {
       names = readdirSync(plan.dir, { withFileTypes: true })
@@ -374,7 +421,11 @@ function scanBundle(
       if (!ref.includes("/")) continue;
 
       const parsed = parsePlan(readFileSync(taskPath, "utf8"));
-      const receipt = latestReceipt(rows, ref);
+      // receipt direto na ref do bundle tem precedência; senão vale o de
+      // `pinga_task` no repo da TASK (T902)
+      const direct = latestReceipt(rows, ref);
+      const alias = direct === null ? pingaTaskAlias(root, taskPath, allRows) : null;
+      const receipt = direct ?? (alias === null ? null : latestReceipt(alias.rows, alias.task));
       const lease = readLeaseAt(taskSidecarDir(taskPath));
       const shouldProbe =
         probe &&
@@ -391,8 +442,8 @@ function scanBundle(
           planOk: parsed.ok,
           doneWhenExit,
           receipt,
-          rows,
-          task: ref,
+          rows: alias === null ? rows : alias.rows,
+          task: alias === null ? ref : alias.task,
           lease,
         }),
         goal: parsed.ok ? parsed.plan.goal : null,
@@ -403,7 +454,7 @@ function scanBundle(
         done_when_exit: doneWhenExit,
         plan: plan.ref,
         blocked_by: parsed.ok
-          ? pendingDeps(parsed.plan.depends_on ?? [], plan.ref, rows)
+          ? pendingDeps(parsed.plan.depends_on ?? [], plan.ref, rows, aliasPass)
           : [],
       });
     }
@@ -449,6 +500,9 @@ export function scanQueue(
   }
 
   // Escopo do repo (T79): nada casa receipt de outro git antes de classificar.
+  // As linhas cruas ficam para o alias `pinga_task` do bundle (T902), que
+  // aplica o escopo do repo de cada TASK.
+  const allRows = rows;
   rows = rowsInRepoScope(rows, root);
 
   const report: QueueReport = {
@@ -520,6 +574,7 @@ export function scanQueue(
     opts.probe === true,
     opts.probeTask,
     probeTimeoutMs,
+    allRows,
   )) {
     addEntry(entry);
   }
