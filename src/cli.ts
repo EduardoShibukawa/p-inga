@@ -39,6 +39,8 @@ import {
 import { supersedeTask } from "./supersede";
 
 const USAGE = `usage: pinga ledger verify [--ledger PATH]
+       pinga ledger list [--json] [--limit N] [--ledger PATH]   (receipts mais novos primeiro + estado da cadeia)
+       pinga gate [--root DIR] [--ledger PATH] <TASK...>   (0 = todas com receipt done; 12 = pendente)
        pinga queue [--json] [--notify] [--root DIR] [--ledger PATH] [--claim [TASK] [--ttl S]] [--release TASK]
                    [--probe TASK | --probe-all] [--probe-timeout S]
        pinga verify <PLAN.md> [--root PATH] [--ledger PATH] [--attempt N] [--base SHA] [--usage-file PATH] [--override-mode M --reason TEXTO] [--prove-base] [--no-baseline] [--require-delta] [--allow-no-delta] [--allow-verifier-drift]
@@ -299,6 +301,36 @@ async function learnIngestMulti(opts: {
 export async function runCli(argv: string[]): Promise<number> {
   const [command, subcommand, ...rest] = argv;
 
+  // `pinga gate <T...>` (T901): gate de merge chamado pelo manda via
+  // `[commands].gate`. 0 = todas com receipt done; 12 = pendente ou ausente.
+  if (command === "gate") {
+    const args = [subcommand, ...rest].filter((a): a is string => typeof a === "string");
+    const flags = new Set(["--root", "--ledger"]);
+    const opts: Record<string, string> = {};
+    const wanted: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i]!;
+      if (flags.has(a)) {
+        const v = args[++i];
+        if (v === undefined) {
+          console.error(USAGE);
+          return 2;
+        }
+        opts[a] = v;
+      } else if (a !== "--json") {
+        wanted.push(a.trim().toUpperCase());
+      }
+    }
+    let pending: string[] = [];
+    if (wanted.length > 0) {
+      const report = scanQueue({ root: opts["--root"] ?? process.cwd(), ledgerPath: opts["--ledger"], probe: false });
+      const state = new Map(report.tasks.map((t) => [t.task, t.state]));
+      pending = wanted.filter((t) => state.get(t) !== "done");
+    }
+    console.log(JSON.stringify({ ok: pending.length === 0, pending }));
+    return pending.length === 0 ? 0 : 12;
+  }
+
   if (command === "queue") {
     const args = [subcommand, ...rest].filter((a): a is string => typeof a === "string");
     const has = (flag: string): boolean => args.includes(flag);
@@ -430,6 +462,75 @@ export async function runCli(argv: string[]): Promise<number> {
       }
     }
     return 0;
+  }
+
+  if (command === "ledger" && subcommand === "list") {
+    // T903: leitura do ledger para superfícies (a tela Ledger da Roda Web lê
+    // por `[commands].ledger`). Só leitura; uma linha JSON.
+    let ledgerPath = defaultLedgerPath();
+    let limit = 50;
+    for (let i = 0; i < rest.length; i++) {
+      const arg = rest[i];
+      if (arg === "--json") continue;
+      if (arg === "--ledger" || arg === "--limit") {
+        const value = rest[++i];
+        if (value === undefined || value === "") {
+          console.error(USAGE);
+          return 2;
+        }
+        if (arg === "--ledger") ledgerPath = value;
+        else {
+          limit = Number(value);
+          if (!Number.isInteger(limit) || limit < 1) {
+            console.error("pinga ledger list: --limit pede um inteiro >= 1");
+            return 2;
+          }
+        }
+        continue;
+      }
+      console.error(USAGE);
+      return 2;
+    }
+    const ledger = openLedger(ledgerPath);
+    try {
+      const all = ledger.all();
+      const v = ledger.verify();
+      const rows = all
+        .slice(-limit)
+        .reverse()
+        .map((row) => {
+          let body: Record<string, any> = {};
+          try {
+            body = JSON.parse(row.body) ?? {};
+          } catch {
+            // corpo ilegível: a linha sai só com o que a tabela tem
+          }
+          const repoPath = typeof body.repo === "string" ? body.repo.replace(/\/+$/, "") : "";
+          const repoDir = repoPath.endsWith("/.git") ? repoPath.slice(0, -"/.git".length) : repoPath;
+          return {
+            seq: row.seq,
+            task: row.task,
+            status: row.status,
+            flow: typeof body.flow === "string" ? body.flow : "verify",
+            repo: repoDir === "" ? null : repoDir.split("/").pop(),
+            model: body.author?.model ?? null,
+            reason_code: body.reason_code ?? null,
+            created_at: body.created_at ?? null,
+            summary: body.summary ?? null,
+            hash: row.hash,
+          };
+        });
+      console.log(
+        JSON.stringify({
+          chain: v.ok ? { ok: true, count: v.count } : { ok: false, broken_at: v.brokenAt },
+          total: all.length,
+          rows,
+        }),
+      );
+      return 0;
+    } finally {
+      ledger.close();
+    }
   }
 
   if (command === "ledger" && subcommand === "verify") {
