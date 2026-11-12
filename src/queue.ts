@@ -10,7 +10,7 @@ import {
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { defaultLedgerPath, openLedger } from "./ledger";
-import { repoScope } from "./breaker";
+import { repoScope, sameScope } from "./breaker";
 import { changedFiles, fileDigest } from "./guards";
 import type { DriftBaseline } from "./guards";
 import { parsePlan } from "./plan";
@@ -191,7 +191,7 @@ function rowsInRepoScope(rows: LedgerRowLite[], root: string): LedgerRowLite[] {
     try {
       const parsed = JSON.parse(row.body) as { repo?: unknown };
       if (typeof parsed.repo !== "string") return true;
-      return parsed.repo === scope;
+      return sameScope(parsed.repo, scope);
     } catch {
       return true;
     }
@@ -369,7 +369,7 @@ function pingaTaskAlias(
   if (scope === undefined) return null;
   const rows = allRows.filter((row) => {
     try {
-      return (JSON.parse(row.body) as { repo?: unknown }).repo === scope;
+      return sameScope((JSON.parse(row.body) as { repo?: unknown }).repo, scope);
     } catch {
       return false;
     }

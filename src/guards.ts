@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { packagePrefix } from "./breaker";
 
 export type DriftBaseline = Record<string, string | null>;
 
@@ -165,7 +166,10 @@ export function evaluateGuards(input: GuardInput): GuardResult {
 }
 
 export function findRedBase(repoRoot: string, task: string): string | null {
-  const log = Bun.spawnSync(["git", "log", "--format=%H%x09%s"], {
+  // Num pacote de monorepo só valem os commits que tocam o pacote (o mesmo T<N>
+  // existe em outros). Na raiz do repositório fica como sempre, inclusive RED vazio.
+  const inPackage = packagePrefix(repoRoot) !== "";
+  const log = Bun.spawnSync(["git", "log", "--format=%H%x09%s", ...(inPackage ? ["--", "."] : [])], {
     cwd: repoRoot,
     stdout: "pipe",
     stderr: "pipe",
@@ -191,7 +195,8 @@ export function changedFiles(repoRoot: string, base: string): string[] {
   const files = new Set<string>();
 
   const diff = Bun.spawnSync(
-    ["git", "diff", "--name-only", "--no-renames", base],
+    // `--relative`: só o que está sob a raiz do pacote, com caminho relativo a ela
+    ["git", "diff", "--name-only", "--no-renames", "--relative", base],
     { cwd: repoRoot, stdout: "pipe", stderr: "pipe" },
   );
   if (diff.exitCode === 0) {

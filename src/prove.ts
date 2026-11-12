@@ -22,7 +22,7 @@ import { taskRef } from "./task_ref";
 import type { Evidence, ReasonCode, Receipt, Status } from "./receipt";
 import { receiptKind } from "./receipt";
 import { NOT_RUN_TOKENS } from "./tokens";
-import { repoScope, scopedReceipts } from "./breaker";
+import { packagePrefix, repoScope, scopedReceipts } from "./breaker";
 
 /**
  * O git exporta variáveis de contexto de repositorio para os hooks (ex.:
@@ -62,8 +62,9 @@ function sha256hex(data: Buffer | string): string {
  *
  * Sem `--root`, o comportamento é o de sempre: `git rev-parse` a partir da
  * pasta do arquivo (e essa pasta quando não há repo). Com `--root R`, a raiz
- * passa a ser R — que precisa ser a raiz de um repo git, senão o comando
- * falha antes de escrever qualquer recibo.
+ * passa a ser R — que precisa estar dentro de um repo git, senão o comando
+ * falha antes de escrever qualquer recibo. R pode ser a raiz do repo ou, num
+ * monorepo (T904), a pasta de um pacote.
  */
 export function resolveRepoRoot(
   planPath: string,
@@ -101,19 +102,7 @@ export function resolveRepoRoot(
   const res = gitRoot(abs);
   if (res === null || res.exitCode !== 0) return notRepo;
 
-  const top = res.stdout.toString().trim();
-  let sameRoot = top === abs;
-  try {
-    sameRoot = realpathSync(top) === realpathSync(abs);
-  } catch {
-    // path exótico: fica a comparação textual
-  }
-  if (!sameRoot) {
-    return {
-      ok: false,
-      error: `--root não é a raiz de um repo git: ${root} (raiz: ${top})`,
-    };
-  }
+  // T904 (monorepo): a raiz pode ser a pasta de um pacote dentro do repositório.
   return { ok: true, root: abs };
 }
 
@@ -347,7 +336,10 @@ export function proveBase(
 ): ProofResult {
   sweepStaleWorktrees(repoRoot);
 
-  return withTempWorktree(repoRoot, sha, (wtPath) => {
+  const pkg = packagePrefix(repoRoot);
+  return withTempWorktree(repoRoot, sha, (wtRoot) => {
+    // num monorepo o checkout do base é do repositório inteiro; o pacote é uma pasta dele
+    const wtPath = pkg === "" ? wtRoot : join(wtRoot, pkg);
     // Overlay: código do base + testes congelados da árvore de trabalho.
     for (const relPath of plan.tests_frozen ?? []) {
       const src = join(repoRoot, relPath);
