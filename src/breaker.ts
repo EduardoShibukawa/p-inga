@@ -23,7 +23,18 @@ export function computeFailureSignature(f: FailureInput): string {
   return createHash("sha256").update(payload).digest("hex");
 }
 
-/** Escopo estável do repo: realpath do git common dir (igual entre worktrees). */
+/** Pasta do pacote dentro do repositório (`git rev-parse --show-prefix`), sem barra final; "" na raiz. */
+export function packagePrefix(repoRoot: string): string {
+  const r = Bun.spawnSync(["git", "rev-parse", "--show-prefix"], { cwd: repoRoot, stdout: "pipe", stderr: "pipe" });
+  if (r.exitCode !== 0) return "";
+  return r.stdout.toString().trim().replace(/\/+$/, "");
+}
+
+/**
+ * Escopo estável do repo: realpath do git common dir (igual entre worktrees).
+ * T904 (monorepo): quando a raiz é uma subpasta do repositório, o escopo é do
+ * pacote — `<git common dir>#<pasta>` — e o mesmo `T<N>` em dois pacotes não colide.
+ */
 export function repoScope(repoRoot: string): string | undefined {
   const r = Bun.spawnSync(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], {
     cwd: repoRoot,
@@ -32,10 +43,25 @@ export function repoScope(repoRoot: string): string | undefined {
   });
   if (r.exitCode !== 0) return undefined;
   try {
-    return realpathSync(r.stdout.toString().trim());
+    const common = realpathSync(r.stdout.toString().trim());
+    const pkg = packagePrefix(repoRoot);
+    return pkg === "" ? common : `${common}#${pkg}`;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * O receipt pertence a este escopo? Igual, ou — para um pacote de monorepo —
+ * gravado quando o pacote era um repositório separado: o `.git` de uma pasta
+ * com o mesmo nome (`…/<pasta>/.git`). Receipts antigos continuam valendo.
+ */
+export function sameScope(receiptRepo: unknown, scope: string): boolean {
+  if (typeof receiptRepo !== "string") return false;
+  if (receiptRepo === scope) return true;
+  const at = scope.lastIndexOf("#");
+  if (at === -1 || receiptRepo.includes("#")) return false;
+  return receiptRepo.endsWith(`/${scope.slice(at + 1)}/.git`);
 }
 
 /** Recibos da task no escopo do repo; legados (sem `repo`) não pertencem a nenhum escopo. */
@@ -44,7 +70,7 @@ export function scopedReceipts(ledger: Ledger, task: string, repo?: string): Rec
     .all()
     .filter((r) => r.task === task)
     .map((r) => JSON.parse(r.body) as Receipt)
-    .filter((rcpt) => repo === undefined || rcpt.repo === repo);
+    .filter((rcpt) => repo === undefined || sameScope(rcpt.repo, repo));
 }
 
 export function lastReceiptFor(ledger: Ledger, task: string, repo?: string): Receipt | null {
